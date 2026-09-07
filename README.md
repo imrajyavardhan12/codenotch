@@ -121,7 +121,7 @@ right-clicking the notch offers **Refresh now**.
 unified log.
 
 ```sh
-/usr/bin/log stream --predicate 'subsystem == "com.vinz.codenotch"' --level debug
+/usr/bin/log stream --predicate 'subsystem == "io.github.imrajyavardhan12.codenotch"' --level debug
 ```
 
 ## Contributing

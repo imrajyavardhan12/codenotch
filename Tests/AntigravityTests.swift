@@ -680,7 +680,7 @@ final class AuthorCreditTests: XCTestCase {
     /// Pinned because a wrong handle in a credit is worse than none, and it is
     /// the kind of string nobody re-reads once it looks right.
     func testTheCreditPointsAtTheRightAccount() {
-        XCTAssertEqual(SettingsView.authorURL.absoluteString, "https://x.com/hivinz_")
+        XCTAssertEqual(SettingsView.authorURL.absoluteString, "https://github.com/imrajyavardhan12")
         XCTAssertEqual(SettingsView.authorURL.scheme, "https")
     }
 }

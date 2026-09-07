@@ -1,6 +1,6 @@
 name: Codenotch
 options:
-  bundleIdPrefix: com.vinz
+  bundleIdPrefix: io.github.imrajyavardhan12
   deploymentTarget:
     macOS: "26.0"
   createIntermediateGroups: true
@@ -22,7 +22,11 @@ settings:
     # and the prompt would come back after every `make run`.
     CODE_SIGN_IDENTITY: "Developer ID Application"
     CODE_SIGN_STYLE: Manual
-    DEVELOPMENT_TEAM: 6WFPL8B9FB
+    # Empty until there is a paid membership to attach: Debug builds ad-hoc
+    # sign (see `configs` below) and need no team at all. `make release` —
+    # archive, notarize, Sparkle feed — needs a Developer ID certificate and
+    # sets this to its Team ID when that day comes.
+    DEVELOPMENT_TEAM: ""
     CODE_SIGNING_REQUIRED: "YES"
     CODE_SIGNING_ALLOWED: "YES"
     # Required by notarization. Worth knowing what it does *not* break here:
@@ -33,6 +37,17 @@ settings:
     ENABLE_HARDENED_RUNTIME: "YES"
     ENABLE_APP_SANDBOX: "NO"
     ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+
+  configs:
+    Debug:
+      # Contributors don't have the maintainer's Developer ID certificate, and
+      # must not need it: Debug builds ad-hoc sign (`-`), which is enough to
+      # run and test locally. The one thing an ad-hoc identity loses is a
+      # stable keychain ACL, so the keychain prompt reappears after each
+      # rebuild during development — documented in CONTRIBUTING.md. Release
+      # keeps the pinned Developer ID identity from `base`.
+      CODE_SIGN_IDENTITY: "-"
+      DEVELOPMENT_TEAM: ""
 
 packages:
   Sparkle:
@@ -63,19 +78,24 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         # --- Sparkle -------------------------------------------------------
-        # Beside the download itself, on hivinz.com. It used to point at a
-        # GitHub Pages URL for a repo that was never created, so every check
-        # got a 404 and Sparkle reported "an error occurred in retrieving
-        # update information" — correctly, since there was nothing there.
+        # Beside the download itself, on this fork's GitHub Pages site. Served
+        # from `site/`, which `make appcast` rebuilds from the .dmg actually
+        # in the folder — the enclosure URL it advertises has to match where
+        # the file sits, or an update downloads and then fails to verify.
         #
         # Must stay reachable for as long as any copy is installed: the feed is
         # the only route by which a shipped build can ever be replaced.
-        SUFeedURL: https://hivinz.com/appcast.xml
+        SUFeedURL: https://imrajyavardhan12.github.io/codenotch/appcast.xml
         # The public half of the EdDSA key in the login keychain. Sparkle
         # refuses any update not signed by its private half, so a hijacked feed
         # or a swapped download cannot install code. Losing the private key
         # means no existing install can ever be updated again — back it up.
-        SUPublicEDKey: rmUfT5r49nR+3HdkbR5/YYLghfnAi6L49eOk3sIegSk=
+        # The public half of this fork's own EdDSA keypair (generated with
+        # Sparkle's `generate_keys`; the private half lives in the login
+        # keychain). Sparkle refuses any update not signed by its private
+        # half. Losing the private key means no existing install can ever be
+        # updated again — back it up.
+        SUPublicEDKey: ZqOF+G9qQVIeWZB9YGoRKAdKD0CQ8poKqy8Q+WBBDcU=
         # Set explicitly so Sparkle never asks on first launch. Left unset, it
         # shows a "check for updates automatically?" prompt, which is exactly
         # the permission this is meant to avoid.
@@ -84,7 +104,7 @@ targets:
         SUScheduledCheckInterval: 86400
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.vinz.codenotch
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.imrajyavardhan12.codenotch
         GENERATE_INFOPLIST_FILE: "NO"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
 
@@ -97,7 +117,7 @@ targets:
       - target: Codenotch
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.vinz.codenotch.tests
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.imrajyavardhan12.codenotch.tests
         GENERATE_INFOPLIST_FILE: "YES"
 
 schemes:

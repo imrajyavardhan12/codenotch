@@ -62,5 +62,5 @@ minimum:
 Include the unified log around the time it happened:
 
 ```sh
-/usr/bin/log show --last 10m --predicate 'subsystem == "com.vinz.codenotch"' --info --debug
+/usr/bin/log show --last 10m --predicate 'subsystem == "io.github.imrajyavardhan12.codenotch"' --info --debug
 ```

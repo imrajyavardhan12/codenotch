@@ -684,6 +684,45 @@ final class RenameMigrationTests: XCTestCase {
         Preferences.migrateFromPreviousName(into: defaults, from: "does.not.exist")
         XCTAssertTrue(Preferences(defaults: defaults).isConnected("claude"))
     }
+
+    /// The fork renamed the bundle id, so the default run migrates from the
+    /// previous install's domain without being told which. Seeded under the
+    /// real old name and removed afterwards — like `oldDomain`, but the name
+    /// under test is fixed, so a crash here would leave residue behind. That
+    /// residue sits under a domain nothing reads any more, which bounds the
+    /// damage to clutter.
+    @MainActor
+    func testTheDefaultRunMigratesFromThePreviousInstall() {
+        let (defaults, _) = suite()
+        UserDefaults.standard.setPersistentDomain(
+            ["hiddenProviders": ["cursor"]], forName: "com.vinz.codenotch")
+        defer { UserDefaults.standard.removePersistentDomain(forName: "com.vinz.codenotch") }
+
+        Preferences.migrateFromPreviousName(into: defaults)
+
+        XCTAssertFalse(Preferences(defaults: defaults).isConnected("cursor"))
+    }
+
+    /// Two renames back both have settings: the newer install wins, because it
+    /// is the state the user most recently saw.
+    @MainActor
+    func testTheNewestPreviousDomainWins() {
+        let (defaults, _) = suite()
+        UserDefaults.standard.setPersistentDomain(
+            ["hiddenProviders": ["cursor"]], forName: "com.vinz.codenotch")
+        UserDefaults.standard.setPersistentDomain(
+            ["hiddenProviders": ["codex"]], forName: "com.vinz.usagenotch")
+        defer {
+            UserDefaults.standard.removePersistentDomain(forName: "com.vinz.codenotch")
+            UserDefaults.standard.removePersistentDomain(forName: "com.vinz.usagenotch")
+        }
+
+        Preferences.migrateFromPreviousName(into: defaults)
+
+        let preferences = Preferences(defaults: defaults)
+        XCTAssertFalse(preferences.isConnected("cursor"))
+        XCTAssertTrue(preferences.isConnected("codex"))
+    }
 }
 
 /// The card's height is budgeted, not measured, and the panel reaches inward by

@@ -1,0 +1,32 @@
+# Serves `site/` (Sparkle appcast + .dmg) as the update feed at
+# https://imrajyavardhan12.github.io/codenotch/appcast.xml — the SUFeedURL the
+# app polls. One-time setup: repo Settings → Pages → Source: GitHub Actions.
+# Content appears on the first `make release`; until then the feed 404s and
+# the app reports "couldn't reach the update server, will retry" — an honest
+# status, not an error.
+
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths: [site/**]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - uses: actions/deploy-pages@v5
+        id: deployment

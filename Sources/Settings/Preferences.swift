@@ -70,28 +70,35 @@ final class Preferences: ObservableObject {
     /// at all.
     let isFirstLaunch: Bool
 
-    /// The bundle identifier before the app was renamed to Codenotch.
+    /// Bundle identifiers this app's settings lived under before, newest first.
     ///
     /// A bundle id is the name of the defaults domain, so renaming the app
     /// silently moved every setting to a new, empty one — connection choices,
     /// the notch's mode, the archived readings, all apparently lost. Copying
     /// the old domain across once is the difference between a rename and what
-    /// looks like a reset.
-    private static let previousDomain = "com.vinz.usagenotch"
+    /// looks like a reset. The fork's own rename heads the list, so an install
+    /// that updates across it keeps its choices; older names follow for the
+    /// same reason the original rename needed one.
+    private static let previousDomains = ["com.vinz.codenotch", "com.vinz.usagenotch"]
 
     static func migrateFromPreviousName(into defaults: UserDefaults = .standard,
-                                        from domain: String = previousDomain) {
+                                        from domain: String? = nil) {
         // The emptiness test has to be about the object being written to, not
         // about `Bundle.main` — under test those are different domains, and the
         // first version happily copied real settings into a test's scratch
         // suite. `hasLaunched` is the sentinel: `Preferences.init` sets it, so
         // its absence means nothing has ever used this domain.
-        guard defaults.object(forKey: Keys.hasLaunched) == nil,
-              let old = defaults.persistentDomain(forName: domain), !old.isEmpty
-        else { return }
+        for candidate in domain.map({ [$0] }) ?? previousDomains {
+            guard defaults.object(forKey: Keys.hasLaunched) == nil,
+                  let old = defaults.persistentDomain(forName: candidate), !old.isEmpty
+            else { continue }
 
-        for (key, value) in old { defaults.set(value, forKey: key) }
-        Log.usage.info("migrated \(old.count) settings from the previous app name")
+            for (key, value) in old { defaults.set(value, forKey: key) }
+            Log.usage.info("migrated \(old.count) settings from the previous app name")
+            // Exactly one source: the newest domain with anything in it wins,
+            // and older ones must not overwrite it key by key afterwards.
+            break
+        }
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -144,7 +151,7 @@ final class Preferences: ObservableObject {
     /// update, and wiping data on every Sparkle update would be catastrophic.
     /// It has to be something the user asks for.
     static func eraseAllData() {
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.vinz.codenotch"
+        let bundleID = Bundle.main.bundleIdentifier ?? "io.github.imrajyavardhan12.codenotch"
         UserDefaults.standard.removePersistentDomain(forName: bundleID)
         UserDefaults.standard.synchronize()
 

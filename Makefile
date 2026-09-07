@@ -1,4 +1,6 @@
-export DEVELOPER_DIR := /Applications/Xcode.app/Contents/Developer
+# `?=` so CI (and anyone with Xcode elsewhere) can override it:
+# `make test DEVELOPER_DIR="$(xcode-select -p)"`. Unset, it is the local default.
+export DEVELOPER_DIR ?= /Applications/Xcode.app/Contents/Developer
 
 PROJECT := Codenotch.xcodeproj
 SCHEME  := Codenotch
@@ -33,19 +35,22 @@ clean:
 #
 # One-time setup, which you have to run yourself because it takes a password:
 #
-#   xcrun notarytool store-credentials UsageNotch \
-#       --apple-id <your-apple-id> --team-id 6WFPL8B9FB --password <app-specific-password>
+#   xcrun notarytool store-credentials Codenotch \
+#       --apple-id <your-apple-id> --team-id <your-team-id> --password <app-specific-password>
 #
 # The app-specific password comes from appleid.apple.com → Sign-In and Security
 # → App-Specific Passwords. Not your Apple ID password.
 
 RELEASE_DIR := build/release
 APP_NAME    := Codenotch
-# The label of the stored notarytool credential in the login keychain, not
-# anything to do with the app's name — it was created before the rename and
-# renaming the variable is what broke `make release` after it. Recreating it
-# needs an app-specific password, so the label simply stays as it is.
-NOTARY_PROFILE := UsageNotch
+# The label of the stored notarytool credential in the login keychain.
+# Created with the command above when there is a paid membership to notarize
+# with; until then `make release` is maintainer-only and stays unused.
+NOTARY_PROFILE := Codenotch
+# The paid-membership Team ID `make release` signs and notarizes with. Empty
+# until there is a membership to attach — set it on the command line or here
+# when cutting a release becomes real: `make release TEAM_ID=XXXXXXXXXX`.
+TEAM_ID ?= 
 DMG := $(RELEASE_DIR)/$(APP_NAME).dmg
 
 .PHONY: archive dmg notarize release verify-release
@@ -67,7 +72,7 @@ archive: gen
 		'<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
 		'<plist version="1.0"><dict>' \
 		'<key>method</key><string>developer-id</string>' \
-		'<key>teamID</key><string>6WFPL8B9FB</string>' \
+		'<key>teamID</key><string>$(TEAM_ID)</string>' \
 		'<key>signingStyle</key><string>manual</string>' \
 		'<key>signingCertificate</key><string>Developer ID Application</string>' \
 		'</dict></plist>' > $(RELEASE_DIR)/ExportOptions.plist
@@ -114,7 +119,7 @@ SPARKLE_BIN = $(shell dirname $$(find $$HOME/Library/Developer/Xcode/DerivedData
 PAGES_DIR := site
 # Where the dmg actually sits. The enclosure URL the appcast advertises has to
 # match it exactly, or an update downloads and then fails to verify.
-DOWNLOAD_PREFIX := https://hivinz.com/
+DOWNLOAD_PREFIX := https://imrajyavardhan12.github.io/codenotch/
 
 appcast: $(DMG)
 	@test -n "$(SPARKLE_BIN)" || (echo "Sparkle tools not found — run make build first" && exit 1)
