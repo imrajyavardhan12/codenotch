@@ -7,3 +7,8 @@ DerivedData/
 xcuserdata/
 *.xcuserstate
 .swiftpm/
+
+# Release artifacts are published via GitHub Releases, not git — a .dmg in
+# the tree bloats every future clone. The Sparkle appcast in site/ stays
+# tracked; the disk image it points at does not.
+site/*.dmg

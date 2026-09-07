@@ -38,6 +38,10 @@ final class UsageStore: ObservableObject {
     var isBusy: () -> Bool = { false }
 
     private let refreshInterval: TimeInterval
+    /// How long one provider may take before its slot degrades to the last
+    /// good reading instead of holding every other ring hostage. Generous on
+    /// purpose: the local adapters answer in milliseconds and the remote ones
+    /// in a second or two, so anything past this is hung, not slow.
     /// How long a snapshot stays believable after its last successful fetch.
     ///
     /// Comfortably above `idleRefreshInterval`, on purpose. With the two equal,
@@ -47,6 +51,7 @@ final class UsageStore: ObservableObject {
     /// tried every five minutes after. The margin buys room for a couple of
     /// those attempts to have genuinely failed before the ring says so; it
     /// must never fire merely because the idle schedule hasn't come round yet.
+    private let perProviderTimeout: TimeInterval
     private let staleAfter: TimeInterval
     /// How often to look when nothing is running.
     private let idleRefreshInterval: TimeInterval
@@ -66,6 +71,7 @@ final class UsageStore: ObservableObject {
         refreshInterval: TimeInterval = 60,
         idleRefreshInterval: TimeInterval = 5 * 60,
         staleAfter: TimeInterval = 15 * 60,
+        perProviderTimeout: TimeInterval = 15,
         archive: UsageArchive = UsageArchive(),
         disconnected: Set<String> = []
     ) {
@@ -73,6 +79,7 @@ final class UsageStore: ObservableObject {
         self.refreshInterval = refreshInterval
         self.idleRefreshInterval = idleRefreshInterval
         self.staleAfter = staleAfter
+        self.perProviderTimeout = perProviderTimeout
         self.archive = archive
 
         // Open on what we knew last time rather than on an empty ring; the
@@ -181,11 +188,20 @@ final class UsageStore: ObservableObject {
         let live = providers.filter { !disconnected.contains($0.id) }
         refreshing = Set(live.map(\.id))
         defer { refreshing = [] }
-        var next: [ProviderSnapshot] = []
-        for provider in live {
-            next.append(await snapshot(from: provider))
+        // Fetched concurrently. This used to await each provider in turn, so
+        // one hung endpoint held every other ring hostage behind it. Each
+        // slot still degrades independently to its last good reading, and the
+        // provider order is restored afterwards so rings never swap places.
+        var fresh: [String: ProviderSnapshot] = [:]
+        await withTaskGroup(of: (String, ProviderSnapshot).self) { group in
+            for provider in live {
+                group.addTask { [provider] in (provider.id, await self.snapshot(from: provider)) }
+            }
+            for await (id, snapshot) in group {
+                fresh[id] = snapshot
+            }
         }
-        snapshots = next
+        snapshots = live.compactMap { fresh[$0.id] }
     }
 
     /// Refetch one provider, leaving the others alone.
@@ -299,7 +315,12 @@ final class UsageStore: ObservableObject {
 
     private func snapshot(from provider: UsageProvider) async -> ProviderSnapshot {
         do {
-            let fresh = try await provider.fetchSnapshot()
+            // Bounded: without this, one hung endpoint stalls its slot
+            // forever. The timeout reads as an ordinary fetch failure, so the
+            // slot degrades to its last good reading like any other.
+            let fresh = try await withTimeout(seconds: perProviderTimeout) {
+                try await provider.fetchSnapshot()
+            }
             lastGood[provider.id] = (fresh, Date())
             archive.save(lastGood)
             refusedAccess.remove(provider.id)
@@ -372,6 +393,8 @@ final class UsageStore: ObservableObject {
     /// failure looks like is worth pinning down.
     static func statusForTesting(_ error: Error) -> ProviderStatus { status(for: error) }
 
+    /// Exposed so tests can shrink the timeout without waiting out the real one.
+    var perProviderTimeoutForTesting: TimeInterval { perProviderTimeout }
     /// Exposed so a test can hold the shipped defaults to the margin they are
     /// supposed to keep, without re-typing the numbers on both sides.
     var staleAfterForTesting: TimeInterval { staleAfter }
@@ -410,5 +433,36 @@ final class UsageStore: ObservableObject {
             status: .stale(since: .distantPast),
             windows: []
         )
+    }
+}
+
+/// Thrown when one provider takes longer than `perProviderTimeout`. Private on
+/// purpose: the store maps any error onto a `ProviderStatus`, so a hung
+/// endpoint reads as an ordinary fetch failure — it is not a new kind of
+/// status, and the provider contract never sees it.
+private struct ProviderTimeout: LocalizedError {
+    let seconds: TimeInterval
+    var errorDescription: String? { "Timed out after \(Int(seconds))s" }
+}
+
+/// Races `work` against a sleep and returns whichever finishes first. The
+/// loser is cancelled; if the work ignores cancellation its answer is still
+/// discarded, and the slot heals itself on the next scheduled refresh rather
+/// than staying dimmed.
+private func withTimeout<T: Sendable>(
+    seconds: TimeInterval,
+    work: @escaping @Sendable () async throws -> T
+) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask { try await work() }
+        group.addTask {
+            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            throw ProviderTimeout(seconds: seconds)
+        }
+        guard let winner = try await group.next() else {
+            throw ProviderTimeout(seconds: seconds)
+        }
+        group.cancelAll()
+        return winner
     }
 }

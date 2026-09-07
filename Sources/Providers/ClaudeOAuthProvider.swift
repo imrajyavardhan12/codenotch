@@ -205,8 +205,12 @@ actor ClaudeOAuthProvider: UsageProvider {
 
     nonisolated func forgetCachedCredential() { keychain.forgetCached() }
 
+    /// Through the injected loader rather than straight at the keychain, so a
+    /// test can substitute a fake source: reading the real item puts a
+    /// keychain prompt in front of whoever runs the suite. Production passes
+    /// no substitute, so this still reads what the next fetch will use.
     nonisolated func account() -> ProviderAccount? {
-        guard let credentials = try? keychain.load() else { return nil }
+        guard let credentials = try? loadCredentials() else { return nil }
         return ProviderAccount(
             label: nil,   // the credential carries no address
             plan: credentials.subscriptionType,

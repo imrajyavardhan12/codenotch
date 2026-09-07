@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Generate, build, test
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      # The Makefile defaults DEVELOPER_DIR to a local Xcode path; on the
+      # runner the toolchain lives wherever xcode-select says it does.
+      - name: Test
+        run: make test DEVELOPER_DIR="$(xcode-select -p)"

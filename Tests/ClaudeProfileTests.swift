@@ -186,12 +186,20 @@ final class ClaudeProfileTests: XCTestCase {
         let defaults = UserDefaults(suiteName: name)!
         defaults.removePersistentDomain(forName: name)
         let home = URL(fileURLWithPath: "/Users/vinz")
+        // Signed out on purpose: without a substitute the providers read the
+        // real login keychain here, which puts a keychain prompt in front of
+        // whoever runs the suite. This test only cares about identities.
+        let signedOut: @Sendable () throws -> ClaudeCredentials = {
+            throw UsageProviderError.needsAuth
+        }
         let store = UsageStore(
             providers: [
-                ClaudeOAuthProvider(profile: .default(home: home), archive: UsageArchive(defaults: defaults)),
+                ClaudeOAuthProvider(profile: .default(home: home), archive: UsageArchive(defaults: defaults),
+                                    loadCredentials: signedOut),
                 ClaudeOAuthProvider(profile: ClaudeProfile(slug: "work",
                                                            configDirectory: home.appendingPathComponent(".claude-work")),
-                                    archive: UsageArchive(defaults: defaults))
+                                    archive: UsageArchive(defaults: defaults),
+                                    loadCredentials: signedOut)
             ],
             archive: UsageArchive(defaults: defaults)
         )

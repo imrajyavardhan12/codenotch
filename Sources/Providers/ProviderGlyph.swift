@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Which mark a provider cell draws.
-enum ProviderGlyph: String, Codable, Equatable {
+enum ProviderGlyph: String, Codable, Equatable, Sendable {
     case claude
     case openai
     case third

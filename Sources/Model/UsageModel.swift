@@ -2,7 +2,7 @@ import Foundation
 
 /// How much to trust a provider's numbers. The UI never presents a derived or
 /// manual figure as if a vendor had published it.
-enum Fidelity: String, Codable, Equatable {
+enum Fidelity: String, Codable, Equatable, Sendable {
     case official
     case derived
     case manual
@@ -11,7 +11,7 @@ enum Fidelity: String, Codable, Equatable {
     var qualifier: String { self == .official ? "" : "~" }
 }
 
-enum ProviderStatus: Equatable {
+enum ProviderStatus: Equatable, Sendable {
     case ok
     case stale(since: Date)
     case needsAuth
@@ -28,7 +28,7 @@ enum ProviderStatus: Equatable {
 
 /// One metered window a provider exposes — Claude has two (the rolling session
 /// and the longer all-models window), others have one.
-struct LimitWindow: Identifiable, Codable, Equatable {
+struct LimitWindow: Identifiable, Codable, Equatable, Sendable {
     let id: String
     let label: String
     /// 0...1+, where 1 means the limit is spent. Nil when the provider reports
@@ -81,7 +81,7 @@ struct LimitWindow: Identifiable, Codable, Equatable {
 /// so "84% left" and "paused until 4:13 PM" are both true at once. A ring that
 /// only knows the headline reports the first and hides the second, which is
 /// the reading that actually stops you working.
-struct UsageBlock: Equatable {
+struct UsageBlock: Equatable, Sendable {
     /// What is paused, in the vendor's own terms.
     let reason: String
     /// When it lifts, where the vendor says.
@@ -100,7 +100,7 @@ struct UsageBlock: Equatable {
     }
 }
 
-struct ProviderSnapshot: Identifiable, Equatable {
+struct ProviderSnapshot: Identifiable, Equatable, Sendable {
     let id: String
     let displayName: String
     let glyph: ProviderGlyph
