@@ -1,0 +1,6 @@
+# This folder is the Sparkle update feed, served via GitHub Pages at
+# https://imrajyavardhan12.github.io/codenotch/appcast.xml
+#
+# `make release` fills it (Codenotch.dmg + appcast.xml). This placeholder
+# only keeps the folder itself in git — git does not track empty
+# directories, and without it the Pages workflow fails archiving.
