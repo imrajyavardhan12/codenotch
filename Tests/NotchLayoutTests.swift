@@ -572,9 +572,26 @@ final class ProviderGlyphTests: XCTestCase {
     }
 
     func testEveryGlyphResolvesAnOutline() {
-        for glyph in [ProviderGlyph.claude, .openai, .third, .cursor, .antigravity] {
+        for glyph in [ProviderGlyph.claude, .openai, .third, .cursor, .antigravity, .opencode] {
             XCTAssertFalse(glyph.outline.isEmpty, "\(glyph) draws nothing")
         }
+    }
+
+    /// The pixel-O is two loops — ring and counter — both inside the unit box
+    /// and filling it on the longer axis, or the mark renders small for no
+    /// reason next to its neighbours.
+    func testTheOpenCodeMarkIsTwoLoopsInTheUnitBox() {
+        let loops = GlyphOutline.opencode
+        XCTAssertEqual(loops.count, 2)
+        let points = loops.flatMap { $0 }
+        XCTAssertGreaterThan(points.count, 50)
+        for p in points {
+            XCTAssertTrue((0...1).contains(p.x), "x outside the unit box: \(p.x)")
+            XCTAssertTrue((0...1).contains(p.y), "y outside the unit box: \(p.y)")
+        }
+        let span = max(points.map(\.x).max()! - points.map(\.x).min()!,
+                       points.map(\.y).max()! - points.map(\.y).min()!)
+        XCTAssertEqual(span, 1, accuracy: 0.01)
     }
 
     /// The raw value is what archived readings were written under.

@@ -409,4 +409,20 @@ enum GlyphOutline {
          CGPoint(x: 0.6820, y: 0.2000), CGPoint(x: 0.0200, y: 0.2000)]
     ]
 
+    /// OpenCode's pixel "O": a hollow square-block ring, measured off the
+    /// vendor's own 96px favicon rather than traced from a screenshot. Outer
+    /// box x 24–71, y 18–77 with a 12px stroke and square pixel corners (a
+    /// 2px rounding keeps tiny renders from sparking); normalised by the
+    /// longer axis with the aspect preserved, so the even-odd counter reads
+    /// as the hole it is. The favicon's grey inset is left out on purpose —
+    /// a template glyph is one ink, and the ring alone is the mark.
+    static let opencode: [[CGPoint]] = [
+        [ // outer
+         CGPoint(x: 0.8644, y: 0.0000), CGPoint(x: 0.8710, y: 0.0007), CGPoint(x: 0.8774, y: 0.0026), CGPoint(x: 0.8832, y: 0.0057), CGPoint(x: 0.8884, y: 0.0099), CGPoint(x: 0.8926, y: 0.0151), CGPoint(x: 0.8957, y: 0.0209), CGPoint(x: 0.8977, y: 0.0273), CGPoint(x: 0.8983, y: 0.0339), CGPoint(x: 0.8983, y: 0.9661), CGPoint(x: 0.8977, y: 0.9727), CGPoint(x: 0.8957, y: 0.9791), CGPoint(x: 0.8926, y: 0.9849), CGPoint(x: 0.8884, y: 0.9901), CGPoint(x: 0.8832, y: 0.9943), CGPoint(x: 0.8774, y: 0.9974), CGPoint(x: 0.8710, y: 0.9993), CGPoint(x: 0.8644, y: 1.0000), CGPoint(x: 0.1356, y: 1.0000), CGPoint(x: 0.1290, y: 0.9993), CGPoint(x: 0.1226, y: 0.9974), CGPoint(x: 0.1168, y: 0.9943), CGPoint(x: 0.1116, y: 0.9901), CGPoint(x: 0.1074, y: 0.9849), CGPoint(x: 0.1043, y: 0.9791), CGPoint(x: 0.1023, y: 0.9727), CGPoint(x: 0.1017, y: 0.9661), CGPoint(x: 0.1017, y: 0.0339), CGPoint(x: 0.1023, y: 0.0273), CGPoint(x: 0.1043, y: 0.0209), CGPoint(x: 0.1074, y: 0.0151), CGPoint(x: 0.1116, y: 0.0099), CGPoint(x: 0.1168, y: 0.0057), CGPoint(x: 0.1226, y: 0.0026), CGPoint(x: 0.1290, y: 0.0007), CGPoint(x: 0.1356, y: 0.0000),
+        ],
+        [ // inner
+         CGPoint(x: 0.6780, y: 0.2034), CGPoint(x: 0.6813, y: 0.2037), CGPoint(x: 0.6845, y: 0.2047), CGPoint(x: 0.6874, y: 0.2062), CGPoint(x: 0.6900, y: 0.2084), CGPoint(x: 0.6921, y: 0.2109), CGPoint(x: 0.6936, y: 0.2139), CGPoint(x: 0.6946, y: 0.2170), CGPoint(x: 0.6949, y: 0.2203), CGPoint(x: 0.6949, y: 0.7797), CGPoint(x: 0.6946, y: 0.7830), CGPoint(x: 0.6936, y: 0.7861), CGPoint(x: 0.6921, y: 0.7891), CGPoint(x: 0.6900, y: 0.7916), CGPoint(x: 0.6874, y: 0.7938), CGPoint(x: 0.6845, y: 0.7953), CGPoint(x: 0.6813, y: 0.7963), CGPoint(x: 0.6780, y: 0.7966), CGPoint(x: 0.3220, y: 0.7966), CGPoint(x: 0.3187, y: 0.7963), CGPoint(x: 0.3155, y: 0.7953), CGPoint(x: 0.3126, y: 0.7938), CGPoint(x: 0.3100, y: 0.7916), CGPoint(x: 0.3079, y: 0.7891), CGPoint(x: 0.3064, y: 0.7861), CGPoint(x: 0.3054, y: 0.7830), CGPoint(x: 0.3051, y: 0.7797), CGPoint(x: 0.3051, y: 0.2203), CGPoint(x: 0.3054, y: 0.2170), CGPoint(x: 0.3064, y: 0.2139), CGPoint(x: 0.3079, y: 0.2109), CGPoint(x: 0.3100, y: 0.2084), CGPoint(x: 0.3126, y: 0.2062), CGPoint(x: 0.3155, y: 0.2047), CGPoint(x: 0.3187, y: 0.2037), CGPoint(x: 0.3220, y: 0.2034),
+        ],
+    ]
+
 }
