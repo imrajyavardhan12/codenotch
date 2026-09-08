@@ -61,6 +61,12 @@ Switching a provider off (`disconnected`) stops its credential being read
 *at all* — filtering happens before the fetch, and the archived reading is
 forgotten. Signing out additionally discards the in-memory reading.
 
+`Notifier` (`Sources/Notifications/`) watches the same two streams as the
+notch — snapshots and sessions — and posts a local notification when the
+headline number crosses 80%/90% or an agent starts waiting. Only vendor
+numbers count, only changes ping (first sight seeds silently), and delivery
+sits behind a seam so tests never touch the real notification center.
+
 ## Activity: "is it still working?"
 
 Separate from usage numbers. One `AgentActivityMonitor` per provider

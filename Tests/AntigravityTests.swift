@@ -618,12 +618,14 @@ final class FirstRunCopyTests: XCTestCase {
         let name = "FirstRunCopyTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!
         defaults.removePersistentDomain(forName: name)
-        return SettingsView(preferences: Preferences(defaults: defaults),
+        let preferences = Preferences(defaults: defaults)
+        return SettingsView(preferences: preferences,
                             providers: { [] },
                             signOut: { _ in }, signIn: { _ in true },
                             switchAccount: { _ in true },
                             retry: { _ in },
-                            updater: Updater())
+                            updater: Updater(),
+                            notifier: Notifier(preferences: preferences))
     }
 
     /// The setup note has to name the tools. "Tools already signed in on this

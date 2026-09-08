@@ -6,6 +6,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notchController: NotchWindowController?
     private var store: UsageStore?
     private var monitors: [String: any AgentActivityMonitor] = [:]
+    /// Held for the life of the app: dropping it would stop delivery, and the
+    /// settings sheet observes it for the permission state.
+    private var notifier: Notifier?
     private var preferences: Preferences?
     private var settings: SettingsWindowController?
     private var whatsNew: WhatsNewWindowController?
@@ -85,6 +88,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let updater = Updater()
             self.updater = updater
 
+            // Pings for spent limits and waiting agents. Fed from the same two
+            // sinks as the notch itself, so it can never disagree with what
+            // is on screen — it only says out loud what the rings already show.
+            let notifier = Notifier(preferences: preferences)
+            self.notifier = notifier
+
+            // Banner clicks land on Settings via NotificationRouter — installed
+            // beside the notifier it serves, so the two can never drift apart.
+            // The `.openSettings` hop keeps isolated UI behind the same
+            // closure shape as `onOpenSettings` below, which is what compiles
+            // here without new warnings.
+            NotificationRouter.install()
+            NotificationCenter.default.publisher(for: .openSettings)
+                .receive(on: RunLoop.main)
+                .sink { [weak settings] _ in settings?.show() }
+                .store(in: &cancellables)
+
             let settings = SettingsWindowController(
                 preferences: preferences,
                 // A closure so the sheet re-reads accounts each time it comes
@@ -92,6 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // showing the old address until the app restarted.
                 providers: { [weak store] in store?.providerSummaries ?? [] },
                 updater: updater,
+                notifier: notifier,
                 signOut: { [weak store] in store?.signOut(providerID: $0) },
                 signIn: { [weak store] in store?.signIn(providerID: $0) ?? false },
                 switchAccount: { [weak store] in
@@ -153,11 +174,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             store.$snapshots
                 .receive(on: RunLoop.main)
-                .sink { [weak controller] snapshots in
+                .sink { [weak controller, weak notifier] snapshots in
                     withAnimation(NotchMotion.unfold) {
                         controller?.model.snapshots = snapshots
                     }
                     controller?.model.now = Date()
+                    // Main-actor-bound, so the isolated update needs no hop of
+                    // its own — and nothing non-Sendable crosses the boundary
+                    // except into that same isolation, which is exactly what
+                    // keeps this warning-free.
+                    if let notifier {
+                        Task { @MainActor [notifier] in
+                            await notifier.update(snapshots: snapshots)
+                        }
+                    }
                 }
                 .store(in: &cancellables)
             store.start()
@@ -196,11 +226,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for (id, monitor) in monitors {
             monitor.sessionsPublisher
                 .receive(on: RunLoop.main)
-                .sink { [weak controller] live in
+                .sink { [weak self, weak controller] live in
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
                         controller?.model.sessions[id] = live
                     }
                     controller?.model.now = Date()
+                    // The whole table, not just this provider's rows: pruning
+                    // resolved sessions needs the full picture every time.
+                    if let sessions = controller?.model.sessions,
+                       let notifier = self?.notifier {
+                        Task { @MainActor [notifier] in
+                            await notifier.update(sessions: sessions)
+                        }
+                    }
                 }
                 .store(in: &cancellables)
             monitor.start()

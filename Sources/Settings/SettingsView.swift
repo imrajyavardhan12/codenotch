@@ -20,6 +20,7 @@ struct SettingsView: View {
     /// the whole remedy: asking again is what puts the prompt back on screen.
     let retry: (String) -> Void
     @ObservedObject var updater: Updater
+    @ObservedObject var notifier: Notifier
 
     var body: some View {
         // One page of grouped sections rather than tabs. Tabs hid three
@@ -87,6 +88,30 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            Section("Notifications") {
+                Toggle("Usage and waiting alerts", isOn: $preferences.notificationsEnabled)
+                // The policy in one line, so the switch means something before
+                // the first ping ever arrives.
+                Text("Pings you when a limit passes 80% and 90%, or when an "
+                     + "agent starts waiting on you. Only vendor numbers count, "
+                     + "and only changes do — opening the app onto 95% is "
+                     + "state you can already see, not an interruption.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                // The only failure with no remedy inside this window: macOS
+                // was told no, and only System Settings can unsay it. Say so
+                // plainly rather than letting the switch look broken.
+                if notifier.authorization == .denied {
+                    Text("Notifications are turned off for Codenotch in "
+                         + "System Settings. Turn them back on there to "
+                         + "receive these.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             // Startup and updates together: both are about what Codenotch does
             // without being asked, and one switch under its own header looked
             // like an oversight rather than a section.
@@ -141,10 +166,18 @@ struct SettingsView: View {
         // hunted for is not really a credit.
         .safeAreaInset(edge: .bottom, spacing: 0) { credit }
         .frame(width: SettingsView.width, height: SettingsView.height)
-        .onAppear { accounts = providers() }
+        .onAppear {
+            accounts = providers()
+            notifier.refreshAuthorization()
+        }
         .onReceive(NotificationCenter.default.publisher(
             for: NSWindow.didBecomeKeyNotification
-        )) { _ in accounts = providers() }
+        )) { _ in
+            accounts = providers()
+            // The permission may have been flipped in System Settings while
+            // this sheet was closed; the denial note has to follow that.
+            notifier.refreshAuthorization()
+        }
     }
 
     private var credit: some View {

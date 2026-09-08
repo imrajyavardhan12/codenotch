@@ -16,6 +16,14 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(Array(disconnectedProviders), forKey: Keys.disconnected) }
     }
 
+    /// Whether limits and waiting agents may interrupt with a notification.
+    /// On by default — this is an ambient monitor, and silence is its failure
+    /// mode — but nothing is ever posted before macOS grants permission, which
+    /// is asked for lazily on the first thing worth saying rather than up front.
+    @Published var notificationsEnabled: Bool {
+        didSet { defaults.set(notificationsEnabled, forKey: Keys.notifications) }
+    }
+
     /// How much of itself the notch shows at rest.
     @Published var notchVisibility: NotchVisibility {
         didSet { defaults.set(notchVisibility.rawValue, forKey: Keys.visibility) }
@@ -60,6 +68,7 @@ final class Preferences: ObservableObject {
         static let presence = "appPresence"
         static let edge = "notchEdge"
         static let lastSeenVersion = "lastSeenVersion"
+        static let notifications = "notificationsEnabled"
     }
 
     /// True the very first time this copy runs, and never again.
@@ -106,6 +115,10 @@ final class Preferences: ObservableObject {
         self.isFirstLaunch = !defaults.bool(forKey: Keys.hasLaunched)
         defaults.set(true, forKey: Keys.hasLaunched)
         self.disconnectedProviders = Set(defaults.stringArray(forKey: Keys.disconnected) ?? [])
+        // Absent means never chosen. On: an ambient monitor that never speaks
+        // is a broken promise, and the system permission gate — not this
+        // switch — is what keeps a fresh install quiet until something happens.
+        self.notificationsEnabled = defaults.object(forKey: Keys.notifications) as? Bool ?? true
         // Absent means never chosen, which is the hover behaviour the app was
         // designed around — not hidden, which would make a fresh install look
         // like it failed to start.

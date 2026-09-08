@@ -19,10 +19,12 @@ final class SettingsWindowController {
     private let switchAccount: (String) -> Bool
     private let retry: (String) -> Void
     private let updater: Updater
+    private let notifier: Notifier
 
     init(preferences: Preferences,
          providers: @escaping () -> [ProviderSummary],
          updater: Updater,
+         notifier: Notifier,
          signOut: @escaping (String) -> Void,
          signIn: @escaping (String) -> Bool,
          switchAccount: @escaping (String) -> Bool,
@@ -30,6 +32,7 @@ final class SettingsWindowController {
         self.switchAccount = switchAccount
         self.retry = retry
         self.updater = updater
+        self.notifier = notifier
         self.preferences = preferences
         self.providers = providers
         self.signOut = signOut
@@ -72,7 +75,8 @@ final class SettingsWindowController {
                                    signIn: signIn,
                                    switchAccount: switchAccount,
                                    retry: retry,
-                                   updater: updater)
+                                   updater: updater,
+                                   notifier: notifier)
         )
         window.center()
         window.isReleasedWhenClosed = false
