@@ -24,3 +24,8 @@ jobs:
       # runner the toolchain lives wherever xcode-select says it does.
       - name: Test
         run: make test DEVELOPER_DIR="$(xcode-select -p)"
+
+      # The CLI target is not in the test scheme's build list, so it needs
+      # its own build step — otherwise it rots uncompiled between releases.
+      - name: Build CLI
+        run: make cli DEVELOPER_DIR="$(xcode-select -p)"

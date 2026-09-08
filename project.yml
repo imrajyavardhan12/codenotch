@@ -59,7 +59,12 @@ targets:
     type: application
     platform: macOS
     sources:
+      # The CLI lives under Sources/ for the shared model files, but its
+      # top-level `main.swift` must not compile into the app: `@main` and
+      # top-level code cannot share a module.
       - path: Sources
+        excludes:
+          - CLI
     dependencies:
       - package: Sparkle
     info:
@@ -108,11 +113,43 @@ targets:
         GENERATE_INFOPLIST_FILE: "NO"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
 
+  # The `codenotch status` companion: last-known readings as JSON for bars
+  # and scripts. It reuses the model files rather than duplicating them, and
+  # reads the app's archived readings — no keychain, no network, no new
+  # permissions. `main.swift` (top-level entry code) stays out of the test
+  # target; the pure `StatusCommand` is compiled in for its tests.
+  CodenotchCLI:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/CLI
+      - path: Sources/Model/UsageModel.swift
+      - path: Sources/Model/UsageArchive.swift
+      # UsageBlock.summary formats through ResetCopy; the closure has to be
+      # complete or the tool target fails to compile on its own.
+      - path: Sources/Model/ResetCopy.swift
+      # ProviderGlyphView sizes itself through Design; headless or not, the
+      # file does not compile without it.
+      - path: Sources/DesignSystem/Design.swift
+      - path: Sources/Providers/ProviderGlyph.swift
+      - path: Sources/Providers/GlyphOutline.swift
+      - path: Sources/Providers/ClaudeProfile.swift
+    settings:
+      base:
+        PRODUCT_NAME: codenotch
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.imrajyavardhan12.codenotch.cli
+        # Tells StatusCommand the model types are compiled in locally rather
+        # than imported from the app module (see the `#if` at its top). If
+        # this shared-file list keeps growing, that is the signal to extract
+        # a real CodenotchKit framework instead of extending it again.
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: CLI_TYPES_LOCAL $(inherited)
+
   CodenotchTests:
     type: bundle.unit-test
     platform: macOS
     sources:
       - path: Tests
+      - path: Sources/CLI/StatusCommand.swift
     dependencies:
       - target: Codenotch
     settings:
@@ -132,3 +169,11 @@ schemes:
       config: Debug
       targets:
         - CodenotchTests
+  # So the CLI can be selected, run, and debugger-breakpointed from Xcode
+  # itself rather than only via `make cli`.
+  CodenotchCLI:
+    build:
+      targets:
+        CodenotchCLI: all
+    run:
+      config: Debug

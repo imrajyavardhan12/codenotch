@@ -26,6 +26,24 @@ run: build
 	pkill -x Codenotch || true; \
 	open "$$APP"
 
+# The `codenotch status` companion CLI. A plain tool target: ad-hoc signed
+# like everything Debug, which is all a locally-run binary needs — Gatekeeper
+# only cares about quarantined downloads, not things built on this machine.
+cli: gen
+	xcodebuild -project $(PROJECT) -target CodenotchCLI -destination '$(DEST)' \
+		-configuration Debug build
+
+# Installs the CLI onto PATH. PREFIX defaults to /usr/local (via `sudo`);
+# Homebrew users will want `make install-cli PREFIX=/opt/homebrew`.
+PREFIX ?= /usr/local
+install-cli: cli
+	@BIN=$$(xcodebuild -project $(PROJECT) -target CodenotchCLI -destination '$(DEST)' \
+		-configuration Debug -showBuildSettings 2>/dev/null \
+		| awk -F' = ' '/ BUILT_PRODUCTS_DIR/ {print $$2; exit}')/codenotch; \
+	install -d $(PREFIX)/bin; \
+	install -m 755 "$$BIN" $(PREFIX)/bin/codenotch; \
+	echo "Installed to $(PREFIX)/bin/codenotch"
+
 clean:
 	rm -rf build DerivedData $(PROJECT)
 

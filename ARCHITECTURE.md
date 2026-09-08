@@ -67,6 +67,11 @@ headline number crosses 80%/90% or an agent starts waiting. Only vendor
 numbers count, only changes ping (first sight seeds silently), and delivery
 sits behind a seam so tests never touch the real notification center.
 
+`codenotch status` (`Sources/CLI/`, target `CodenotchCLI`) prints the
+archive's last-known readings as JSON. It reuses the model files rather than
+duplicating them; if that shared list keeps growing, extract a CodenotchKit
+framework instead of extending it again.
+
 ## Activity: "is it still working?"
 
 Separate from usage numbers. One `AgentActivityMonitor` per provider

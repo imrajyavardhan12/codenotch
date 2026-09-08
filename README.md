@@ -66,7 +66,22 @@ built and signed by the maintainer.
 brew install xcodegen   # once
 make run                # generate, build, launch a Debug build
 make test               # unit tests
+make install-cli        # build + install the `codenotch status` companion
 ```
+
+## The CLI
+
+`codenotch status` prints last-known readings as JSON, for menu bars
+(sketchybar), prompts, and scripts:
+
+```sh
+codenotch --provider codex     # compact JSON, one provider
+codenotch --pretty             # indented JSON, every provider
+```
+
+It reads the app's archive — no keychain, no network, no new permissions —
+so each reading carries its age and the consumer decides what is fresh
+enough. Launch the app once and the CLI reports what it knew.
 
 No signing identity is required for either. `make release` — which archives,
 notarizes, and produces a signed auto-update feed — needs a Developer ID
