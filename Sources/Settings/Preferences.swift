@@ -16,6 +16,18 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(Array(disconnectedProviders), forKey: Keys.disconnected) }
     }
 
+    /// Limits the user declares for tools Codenotch does not read natively.
+    /// Stored as one JSON array beside every other preference; each entry
+    /// keeps a stable id so archive readings, notification keys and the
+    /// disconnected set survive renames.
+    @Published var manualLimits: [ManualLimit] {
+        didSet {
+            if let data = try? JSONEncoder().encode(manualLimits) {
+                defaults.set(data, forKey: Keys.manualLimits)
+            }
+        }
+    }
+
     /// Whether limits and waiting agents may interrupt with a notification.
     /// On by default — this is an ambient monitor, and silence is its failure
     /// mode — but nothing is ever posted before macOS grants permission, which
@@ -69,6 +81,7 @@ final class Preferences: ObservableObject {
         static let edge = "notchEdge"
         static let lastSeenVersion = "lastSeenVersion"
         static let notifications = "notificationsEnabled"
+        static let manualLimits = "manualLimits"
     }
 
     /// True the very first time this copy runs, and never again.
@@ -119,6 +132,15 @@ final class Preferences: ObservableObject {
         // is a broken promise, and the system permission gate — not this
         // switch — is what keeps a fresh install quiet until something happens.
         self.notificationsEnabled = defaults.object(forKey: Keys.notifications) as? Bool ?? true
+        // Absent means none declared. A corrupt array decodes to empty rather
+        // than crashing the launch — declarations can be re-entered, readings
+        // cannot be un-lost, and neither is worth a crash.
+        if let data = defaults.data(forKey: Keys.manualLimits),
+           let limits = try? JSONDecoder().decode([ManualLimit].self, from: data) {
+            self.manualLimits = limits
+        } else {
+            self.manualLimits = []
+        }
         // Absent means never chosen, which is the hover behaviour the app was
         // designed around — not hidden, which would make a fresh install look
         // like it failed to start.
@@ -139,6 +161,23 @@ final class Preferences: ObservableObject {
         // Read from the system rather than from our own store: the user can turn
         // this off in System Settings, and a remembered `true` would then be a lie.
         self.launchAtLogin = Self.isRegisteredForLogin
+    }
+
+    func manualLimit(id: String) -> ManualLimit? {
+        manualLimits.first { $0.id == id }
+    }
+
+    func addManualLimit(_ limit: ManualLimit) {
+        manualLimits.append(limit)
+    }
+
+    func updateManualLimit(_ limit: ManualLimit) {
+        guard let index = manualLimits.firstIndex(where: { $0.id == limit.id }) else { return }
+        manualLimits[index] = limit
+    }
+
+    func removeManualLimit(id: String) {
+        manualLimits.removeAll { $0.id == id }
     }
 
     func isConnected(_ providerID: String) -> Bool {

@@ -92,9 +92,9 @@ final class SystemNotifierDelivery: NotifierDelivery, @unchecked Sendable {
 ///
 /// Two sources, one rule each:
 /// - **Limits:** the ring's own (headline) number crossing 80% then 90% — but
-///   only when a vendor said the number (`.official`) and it is live (`.ok`).
-///   A derived guess crossing a line is not news, it is noise; a stale reading
-///   is yesterday's news.
+///   only when the number is a vendor's (`.official`) or the user's own
+///   (`.manual`), and it is live (`.ok`). A derived guess crossing a line is
+///   not news, it is noise; a stale reading is yesterday's news.
 /// - **Sessions:** an agent entering `waiting` — something is blocked on you.
 ///
 /// And one rule over both: **first sight never pings, only changes do.** A cold
@@ -216,7 +216,11 @@ final class Notifier: ObservableObject {
     func pendingUsageEvents(for snapshots: [ProviderSnapshot]) -> [UsageEvent] {
         var events: [UsageEvent] = []
         for snapshot in snapshots {
-            guard snapshot.fidelity == .official,
+            // Official and self-declared numbers both count — but never a
+            // derived guess. A manual budget is the user asking to be held to
+            // it, which is exactly what a ping is for; a guess crossing a
+            // line is noise either way.
+            guard snapshot.fidelity != .derived,
                   snapshot.status == .ok,
                   let fraction = snapshot.usedFraction else {
                 lastFractions.removeValue(forKey: snapshot.id)

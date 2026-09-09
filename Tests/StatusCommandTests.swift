@@ -150,6 +150,22 @@ final class StatusCommandTests: XCTestCase {
 
     /// An unknown filter is a caller error: non-zero, naming the id and what
     /// exists, so a renamed provider shows up as a typo rather than silence.
+    /// A declared limit arrives wearing its qualifier, like every derived
+    /// figure does — the JSON never presents it as a vendor's number.
+    func testManualReadingsKeepTheirQualifier() throws {
+        let snapshot = ProviderSnapshot(
+            id: "manual-abc", displayName: "Copilot", glyph: .custom,
+            fidelity: .manual, status: .ok,
+            windows: [LimitWindow(id: "usage", label: "Used", usedFraction: 0.32)],
+            headlineID: "usage")
+        let result = StatusCommand.run(
+            arguments: [],
+            entries: [(snapshot: snapshot, fetchedAt: Date(timeIntervalSince1970: 1_787_900_000))])
+        let first = try XCTUnwrap(try providers(result.stdout).first)
+        XCTAssertEqual(first["display"] as? String, "~32%")
+        XCTAssertEqual(first["fidelity"] as? String, "manual")
+    }
+
     func testUnknownProviderFailsLoudly() {
         let result = StatusCommand.run(arguments: ["--provider", "copilot"],
                                        entries: entries([snapshot()]))

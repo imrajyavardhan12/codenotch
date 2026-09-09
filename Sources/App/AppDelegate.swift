@@ -75,7 +75,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     + [CursorLocalProvider(), CodexLocalProvider(), AntigravityProvider(),
                        GLMProvider(), OpenCodeProvider()]
                     + webProviders,
-                disconnected: preferences.disconnectedProviders
+                disconnected: preferences.disconnectedProviders,
+                // Seeded here, not only in the sink below: the store draws its
+                // first list before any binding delivers, and unseeded manual
+                // rings would pop in a loop turn later.
+                manualProviders: preferences.manualLimits.map {
+                    ManualProvider(limit: $0, preferences: preferences)
+                }
             )
 
             // The stored edge goes in before the panel is ever put up. The
@@ -93,6 +99,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // is on screen — it only says out loud what the rings already show.
             let notifier = Notifier(preferences: preferences)
             self.notifier = notifier
+
+            // Declared limits arrive the same way, a loop turn later: the
+            // store holds actors built from these values, so every add, edit
+            // or delete rebuilds them. The store's own guard swallows
+            // no-op rebuilds (keystroke-level edits mid-form) without
+            // spending every provider's rate-limit budget on them.
+            preferences.$manualLimits
+                .receive(on: RunLoop.main)
+                .sink { [weak store, weak preferences] limits in
+                    guard let store, let preferences else { return }
+                    store.manualProviders = limits.map {
+                        ManualProvider(limit: $0, preferences: preferences)
+                    }
+                }
+                .store(in: &cancellables)
 
             // Banner clicks land on Settings via NotificationRouter — installed
             // beside the notifier it serves, so the two can never drift apart.

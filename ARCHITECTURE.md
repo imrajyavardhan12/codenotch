@@ -72,6 +72,12 @@ archive's last-known readings as JSON. It reuses the model files rather than
 duplicating them; if that shared list keeps growing, extract a CodenotchKit
 framework instead of extending it again.
 
+Declared limits (`ManualLimit` + `ManualProvider`) are the third provider
+kind: user-entered allowances arriving at runtime via
+`Preferences.manualLimits`, merged into every store read path. Deleting one
+purges it like a sign-out; the notifier and CLI treat `.manual` like
+`.official` (a budget you set is worth a ping), unlike `.derived`.
+
 ## Activity: "is it still working?"
 
 Separate from usage numbers. One `AgentActivityMonitor` per provider

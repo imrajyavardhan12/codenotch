@@ -193,6 +193,24 @@ final class NotifierTests: XCTestCase {
         XCTAssertEqual(Set(spy.delivered.map(\.kind)), [.warning, .critical])
     }
 
+    /// A self-declared budget is the user asking to be held to it: manual
+    /// crossings ping like official ones. Only derived guesses stay silent.
+    func testManualCrossingsPing() {
+        let (notifier, _) = notifier()
+        let manual = ProviderSnapshot(
+            id: "manual-abc", displayName: "Copilot", glyph: .custom,
+            fidelity: .manual, status: .ok,
+            windows: [LimitWindow(id: "usage", label: "Used", usedFraction: 0.5)],
+            headlineID: "usage")
+        _ = notifier.pendingUsageEvents(for: [manual])
+        let over = ProviderSnapshot(
+            id: "manual-abc", displayName: "Copilot", glyph: .custom,
+            fidelity: .manual, status: .ok,
+            windows: [LimitWindow(id: "usage", label: "Used", usedFraction: 0.85)],
+            headlineID: "usage")
+        XCTAssertEqual(notifier.pendingUsageEvents(for: [over]).count, 1)
+    }
+
     // MARK: - Sessions
 
     func testABusySessionNeverPings() {

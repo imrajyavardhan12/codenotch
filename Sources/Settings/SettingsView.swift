@@ -21,6 +21,23 @@ struct SettingsView: View {
     let retry: (String) -> Void
     @ObservedObject var updater: Updater
     @ObservedObject var notifier: Notifier
+    /// Add-sheet versus edit-sheet. One sheet, one state: the editor takes an
+    /// optional initial limit, so add and edit differ only in what opens it.
+    private enum EditorTarget: Identifiable {
+        case add
+        case edit(ManualLimit)
+        var id: String {
+            switch self {
+            case .add: return "add"
+            case .edit(let limit): return "edit-\(limit.id)"
+            }
+        }
+        var initial: ManualLimit? {
+            if case .edit(let limit) = self { return limit }
+            return nil
+        }
+    }
+    @State private var editorTarget: EditorTarget?
 
     var body: some View {
         // One page of grouped sections rather than tabs. Tabs hid three
@@ -32,11 +49,22 @@ struct SettingsView: View {
         Form {
             Section("Integrations") {
                 if needsSetup { setupNote }
-                ForEach(accounts) {
-                    AccountRow(provider: $0, preferences: preferences,
+                ForEach(accounts) { summary in
+                    AccountRow(provider: summary, preferences: preferences,
                                signOut: signOut, signIn: signIn,
-                               switchAccount: switchAccount, retry: retry)
+                               switchAccount: switchAccount, retry: retry,
+                               onEdit: editAction(for: summary))
                 }
+                // Declared limits live beside borrowed accounts: adding one is
+                // part of managing integrations, not a separate destination.
+                Button("Add custom limit…") { editorTarget = .add }
+                    .buttonStyle(.link)
+                Text("For tools Codenotch does not read — Copilot, Ollama, a company "
+                     + "proxy. You declare the allowance and keep the count; the notch "
+                     + "counts down to it like any other ring.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
                 // Beside the switches it explains, not stranded at the end of
                 // the page.
                 Text("Codenotch never signs in — each reading is borrowed from the "
@@ -166,6 +194,19 @@ struct SettingsView: View {
         // hunted for is not really a credit.
         .safeAreaInset(edge: .bottom, spacing: 0) { credit }
         .frame(width: SettingsView.width, height: SettingsView.height)
+        .sheet(item: $editorTarget) { target in
+            ManualLimitEditor(initial: target.initial, onSave: { saved in
+                if target.initial == nil {
+                    preferences.addManualLimit(saved)
+                } else {
+                    preferences.updateManualLimit(saved)
+                }
+                editorTarget = nil
+                // The store rebuilds off the same change a loop turn later;
+                // reading the rows now would list the pre-save state.
+                DispatchQueue.main.async { accounts = providers() }
+            }, onCancel: { editorTarget = nil })
+        }
         .onAppear {
             accounts = providers()
             notifier.refreshAuthorization()
@@ -178,6 +219,17 @@ struct SettingsView: View {
             // this sheet was closed; the denial note has to follow that.
             notifier.refreshAuthorization()
         }
+    }
+
+    /// The edit hook for a declared limit, if this row is one. Borrowed
+    /// accounts edit themselves elsewhere (or nowhere); only manual rows
+    /// open the editor, so only they get the button.
+    private func editAction(for summary: ProviderSummary) -> (() -> Void)? {
+        guard ManualProvider.isManual(id: summary.id),
+              let limit = preferences.manualLimits.first(where: {
+                  ManualProvider.id(for: $0.id) == summary.id
+              }) else { return nil }
+        return { editorTarget = .edit(limit) }
     }
 
     private var credit: some View {
@@ -272,6 +324,9 @@ private struct AccountRow: View {
     let signIn: (String) -> Bool
     let switchAccount: (String) -> Bool
     let retry: (String) -> Void
+    /// Opens the editor. Set only for declared limits — borrowed accounts
+    /// edit themselves elsewhere (or nowhere).
+    let onEdit: (() -> Void)?
 
     private var isConnected: Bool { preferences.isConnected(provider.id) }
 
@@ -339,7 +394,36 @@ private struct AccountRow: View {
 
     @ViewBuilder
     private var detail: some View {
-        if !isConnected {
+        if ManualProvider.isManual(id: provider.id) {
+            // Declared limits answer to no tool, so the borrowed-account copy
+            // about switching elsewhere would be wrong here. Edit and Delete
+            // are the whole account management, on this row.
+            VStack(alignment: .leading, spacing: 2) {
+                // Same consequence notice as every other provider: the switch
+                // shows state, this line shows what it costs.
+                if !isConnected {
+                    Text("Signed out — nothing is read, and no readings are kept.")
+                        .foregroundStyle(.tertiary)
+                }
+                if let account = provider.account {
+                    Text(account.summary)
+                        .foregroundStyle(.secondary)
+                }
+                HStack(spacing: 12) {
+                    if let onEdit {
+                        Button("Edit…", action: onEdit)
+                            .buttonStyle(.link)
+                    }
+                    Button("Delete", role: .destructive) {
+                        if let limitID = ManualProvider.limitID(forProviderID: provider.id) {
+                            preferences.removeManualLimit(id: limitID)
+                        }
+                    }
+                    .buttonStyle(.link)
+                    .help("Forgets this limit and its readings. The toggle above only pauses it.")
+                }
+            }
+        } else if !isConnected {
             Text("Signed out — nothing is read, and no readings are kept.")
                 .foregroundStyle(.tertiary)
         } else if let account = provider.account {

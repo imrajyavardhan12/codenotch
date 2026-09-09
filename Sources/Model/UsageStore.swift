@@ -14,6 +14,36 @@ final class UsageStore: ObservableObject {
     @Published private(set) var refusedAccess: Set<String> = []
 
     private let providers: [UsageProvider]
+    /// User-declared limits, changing at runtime via Settings — unlike the
+    /// fixed adapters built at launch. Merged into every read path through
+    /// `allProviders`, so a manual ring behaves exactly like a borrowed one.
+    /// Plain values, not `@Published`: nothing observes the array itself, only
+    /// the snapshots it produces.
+    var manualProviders: [ManualProvider] = [] {
+        didSet {
+            // Rebuilt on every declaration change, including keystroke-level
+            // edits mid-form — but only an actual difference re-reads: without
+            // this guard every keystroke would spend every provider's
+            // rate-limit budget on a refresh nobody asked for.
+            guard manualProviders.map(\.limit) != oldValue.map(\.limit) else { return }
+            // Deleting a declaration must take its numbers with it, the way
+            // signing out does — otherwise a removed limit's ring comes back
+            // from the archive at the next launch.
+            let liveIDs = Set(allProviders.map(\.id))
+            snapshots.removeAll { !liveIDs.contains($0.id) }
+            for gone in lastGood.keys where !liveIDs.contains(gone) {
+                lastGood.removeValue(forKey: gone)
+            }
+            archive.save(lastGood)
+            refreshNow()
+        }
+    }
+    /// Fixed adapters plus declared limits. Order is provider order: the
+    /// fixed list first (rings never swap places), manual rings after.
+    private var allProviders: [any UsageProvider] {
+        providers.map { $0 as any UsageProvider }
+            + manualProviders.map { $0 as any UsageProvider }
+    }
     /// Providers the user has switched off. They are not fetched at all — their
     /// credential is never read, which is the whole point of switching one off.
     /// Filtering the results afterwards would still touch the keychain.
@@ -73,9 +103,11 @@ final class UsageStore: ObservableObject {
         staleAfter: TimeInterval = 15 * 60,
         perProviderTimeout: TimeInterval = 15,
         archive: UsageArchive = UsageArchive(),
-        disconnected: Set<String> = []
+        disconnected: Set<String> = [],
+        manualProviders: [ManualProvider] = []
     ) {
         self.providers = providers
+        self.manualProviders = manualProviders
         self.refreshInterval = refreshInterval
         self.idleRefreshInterval = idleRefreshInterval
         self.staleAfter = staleAfter
@@ -103,7 +135,7 @@ final class UsageStore: ObservableObject {
         // Filtered here, not only in `didSet`. The store is built before the
         // preference reaches it, so an unfiltered first pass draws every
         // switched-off provider for as long as it takes the binding to arrive.
-        snapshots = providers.filter { !disconnected.contains($0.id) }.map { provider in
+        snapshots = allProviders.filter { !disconnected.contains($0.id) }.map { provider in
             guard let remembered = lastGood[provider.id] else { return Self.placeholder(provider) }
             var snapshot = remembered.snapshot
             snapshot.status = .stale(since: remembered.fetchedAt)
@@ -113,7 +145,7 @@ final class UsageStore: ObservableObject {
 
     /// Enough to list the providers in settings without exposing them.
     var providerSummaries: [ProviderSummary] {
-        providers.map { provider in
+        allProviders.map { provider in
             ProviderSummary(id: provider.id, name: provider.displayName,
                             glyph: provider.glyph, account: provider.account(),
                             signIn: provider.signInRoute,
@@ -185,7 +217,7 @@ final class UsageStore: ObservableObject {
     }
 
     func refresh() async {
-        let live = providers.filter { !disconnected.contains($0.id) }
+        let live = allProviders.filter { !disconnected.contains($0.id) }
         refreshing = Set(live.map(\.id))
         defer { refreshing = [] }
         // Fetched concurrently. This used to await each provider in turn, so
@@ -210,7 +242,7 @@ final class UsageStore: ObservableObject {
     /// reading should not spend every other provider's rate-limit budget, and
     /// Claude's in particular is easy to exhaust.
     func refresh(providerID: String) {
-        guard let provider = providers.first(where: { $0.id == providerID }),
+        guard let provider = allProviders.first(where: { $0.id == providerID }),
               !disconnected.contains(providerID),
               !refreshing.contains(providerID) else { return }
 
@@ -242,7 +274,7 @@ final class UsageStore: ObservableObject {
     /// and deleting their keychain item would sign the user out of an app they
     /// did not ask us to touch. `SignInRoute.signOutCaveat` says so on the row.
     func signOut(providerID: String) {
-        guard let provider = providers.first(where: { $0.id == providerID }) else { return }
+        guard let provider = allProviders.first(where: { $0.id == providerID }) else { return }
 
         snapshots.removeAll { $0.id == providerID }
         lastGood.removeValue(forKey: providerID)
@@ -261,7 +293,7 @@ final class UsageStore: ObservableObject {
     /// when nothing was.
     @discardableResult
     func signIn(providerID: String) -> Bool {
-        guard let provider = providers.first(where: { $0.id == providerID }) else { return false }
+        guard let provider = allProviders.first(where: { $0.id == providerID }) else { return false }
 
         // Already holding a usable credential: connecting is the whole job, and
         // throwing up a sign-in window over a signed-in account is just noise.
@@ -280,7 +312,7 @@ final class UsageStore: ObservableObject {
     /// whenever the token is still valid, so the keychain is never touched and
     /// the prompt never returns — the button would appear to do nothing.
     func reauthorize(providerID: String) {
-        providers.first { $0.id == providerID }?.forgetCachedCredential()
+        allProviders.first { $0.id == providerID }?.forgetCachedCredential()
         refresh(providerID: providerID)
     }
 
@@ -295,7 +327,7 @@ final class UsageStore: ObservableObject {
     /// the thing that owns it.
     @discardableResult
     func openAccountSource(providerID: String) -> Bool {
-        guard let provider = providers.first(where: { $0.id == providerID }) else { return false }
+        guard let provider = allProviders.first(where: { $0.id == providerID }) else { return false }
 
         switch provider.signInRoute {
         case .modal:

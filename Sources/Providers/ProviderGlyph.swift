@@ -12,6 +12,7 @@ enum ProviderGlyph: String, Codable, Equatable, Sendable {
     case antigravity = "gemini"
     case glm
     case opencode
+    case custom
 
     /// If an asset with this name is in the bundle it wins over the traced
     /// outline — drop a PDF/SVG export from Figma in and it is picked up.
@@ -38,6 +39,10 @@ enum ProviderGlyph: String, Codable, Equatable, Sendable {
         // Chunky ring, full-box height: no scaling needed beyond the margins
         // the normalisation already left on each side.
         case .opencode: return 1.0
+        // A solid disc reads heavier than any outline at the same extent;
+        // this pulls it back in line with its neighbours (checked by eye at
+        // 16pt against Claude and Cursor, like the rest).
+        case .custom:   return 0.9
         case .third:  return 1.0
         }
     }
@@ -51,6 +56,7 @@ enum ProviderGlyph: String, Codable, Equatable, Sendable {
         case .antigravity: return GlyphOutline.antigravity
         case .glm:    return GlyphOutline.glm
         case .opencode: return GlyphOutline.opencode
+        case .custom:   return GlyphOutline.custom
         }
     }
 }

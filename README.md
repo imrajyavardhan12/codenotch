@@ -20,6 +20,7 @@ two never disagree.
 | **Antigravity** | official where licensed, otherwise a request count | Antigravity's local language server first, then Google's quota endpoint; a plain count when neither will answer for the account. |
 | **GLM** | official | Z.ai's Coding Plan monitor endpoint, with a key borrowed from whichever coding tool already holds one — Claude Code's `settings.json`, ZCode, or OpenCode. |
 | **OpenCode Go** | official | The Go plan's own usage endpoint, with the key from the CLI's `/connect` sign-in (`auth.json`) — no separate sign-in. |
+| *Custom limits* | manual | Declared by you in Settings for tools Codenotch does not read — Copilot, Ollama, a company proxy. You name the allowance and keep the count; the notch counts down to it, qualified as yours rather than any vendor's. |
 
 Codenotch never signs in anywhere. Every reading is borrowed from a credential
 or session a tool on your Mac already holds — install and sign in to any of
