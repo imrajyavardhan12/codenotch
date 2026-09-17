@@ -234,14 +234,18 @@ final class HorizontalStackTests: XCTestCase {
     }
 
     /// The panel is sized from the stack, so a horizontal notch is wide and
-    /// shallow where a vertical one is narrow and tall.
+    /// shallow where a vertical one is narrow and tall. Compared at five
+    /// cells, not three: the history budget deepened every panel by a fixed
+    /// amount, so at three cells a top panel's depth merely ties its width —
+    /// the stack still drives the width, the tooltip the depth, only the
+    /// crossover moved.
     @MainActor
     func testThePanelTurnsWithTheStack() {
         let model = NotchViewModel()
         model.edge = .right
-        let side = model.panelSize(cellCount: 3)
+        let side = model.panelSize(cellCount: 5)
         model.edge = .top
-        let horizontal = model.panelSize(cellCount: 3)
+        let horizontal = model.panelSize(cellCount: 5)
         XCTAssertGreaterThan(side.height, side.width)
         XCTAssertGreaterThan(horizontal.width, horizontal.height)
     }

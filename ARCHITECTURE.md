@@ -78,6 +78,12 @@ kind: user-entered allowances arriving at runtime via
 purges it like a sign-out; the notifier and CLI treat `.manual` like
 `.official` (a budget you set is worth a ping), unlike `.derived`.
 
+History (`UsageSample`, hourly, 48 kept) rides the snapshot so the tooltip
+line and the archive share one past. The store samples successful fetches;
+`NotchLayout` budgets the line before it arrives (budgets assume it aboard,
+the view draws it past five samples), and gaps break the line instead of
+bridging unobserved hours.
+
 ## Activity: "is it still working?"
 
 Separate from usage numbers. One `AgentActivityMonitor` per provider

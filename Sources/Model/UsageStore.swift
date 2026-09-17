@@ -350,11 +350,24 @@ final class UsageStore: ObservableObject {
             // Bounded: without this, one hung endpoint stalls its slot
             // forever. The timeout reads as an ordinary fetch failure, so the
             // slot degrades to its last good reading like any other.
-            let fresh = try await withTimeout(seconds: perProviderTimeout) {
+            var fresh = try await withTimeout(seconds: perProviderTimeout) {
                 try await provider.fetchSnapshot()
             }
+            // Sample the headline for the history line, then attach what the
+            // archive holds — including this sample — so the tooltip and the
+            // archive can never disagree about the past. Sampling rides the
+            // fetch that already happened: no new timers, no new network.
+            // (Saved first, so the entry `recordSample` appends to exists.)
             lastGood[provider.id] = (fresh, Date())
             archive.save(lastGood)
+            // The recorder returns the line including this sample, so the
+            // attached past is read back from nowhere extra.
+            if let fraction = fresh.usedFraction {
+                fresh.history = archive.recordSample(id: provider.id, fraction: fraction, at: Date())
+            } else {
+                fresh.history = archive.history(for: provider.id)
+            }
+            lastGood[provider.id] = (fresh, Date())
             refusedAccess.remove(provider.id)
             Log.usage.debug("\(provider.id, privacy: .public): \(fresh.windows.count) window(s)")
             return fresh

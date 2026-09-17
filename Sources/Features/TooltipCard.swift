@@ -226,6 +226,89 @@ private struct StatusRing: View {
 
 // MARK: - Providers
 
+/// The last two days as a line: slope is burn rate, height is how unusual
+/// today is. Gaps — app closed, provider quiet — break the line rather than
+/// bridging it, and the vertical domain stays fixed at 0...1 so a flat 2%
+/// reads flat instead of spiking on its own noise.
+private struct HistoryRow: View {
+    let snapshot: ProviderSnapshot
+
+    private var history: [UsageSample] { snapshot.history }
+    private var width: CGFloat { NotchLayout.cardWidth - 2 * NotchLayout.cardPadding }
+    private var color: Color { UsageBand.band(for: snapshot.usedFraction ?? 0).color }
+
+    private var average: Int {
+        guard !history.isEmpty else { return 0 }
+        let mean = history.map(\.fraction).reduce(0, +) / Double(history.count)
+        return Int((mean * 100).rounded())
+    }
+
+    /// Contiguous runs, split wherever samples stand further apart than two
+    /// intervals — the app was closed, or nothing was fetched. Drawn as
+    /// separate paths below, so the gap stays a visible gap.
+    private var segments: [[UsageSample]] {
+        var runs: [[UsageSample]] = []
+        for sample in history {
+            if let last = runs.last?.last,
+               sample.at.timeIntervalSince(last.at) > 2 * UsageArchive.sampleInterval {
+                runs.append([])
+            }
+            if runs.isEmpty { runs.append([]) }
+            runs[runs.count - 1].append(sample)
+        }
+        return runs
+    }
+
+    private func x(_ sample: UsageSample, first: Date, span: TimeInterval) -> CGFloat {
+        guard span > 0 else { return width / 2 }
+        return width * CGFloat(sample.at.timeIntervalSince(first) / span)
+    }
+
+    private func y(_ fraction: Double) -> CGFloat {
+        NotchLayout.sparklineHeight * (1 - min(max(CGFloat(fraction), 0), 1))
+    }
+
+    private func path(_ run: [UsageSample], first: Date, span: TimeInterval) -> Path {
+        var path = Path()
+        guard let head = run.first else { return path }
+        path.move(to: CGPoint(x: x(head, first: first, span: span), y: y(head.fraction)))
+        for sample in run.dropFirst() {
+            path.addLine(to: CGPoint(x: x(sample, first: first, span: span), y: y(sample.fraction)))
+        }
+        return path
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SplitRow(leading: "History", trailing: "avg \(average)%")
+            ZStack(alignment: .leading) {
+                if let first = history.first, let last = history.last {
+                    let span = last.at.timeIntervalSince(first.at)
+                    ForEach(Array(segments.enumerated()), id: \.offset) { _, run in
+                        if run.count == 1, let only = run.first {
+                            // A lone point has no slope to draw: a dot holds
+                            // its place instead of vanishing.
+                            Circle()
+                                .fill(color)
+                                .frame(width: NotchLayout.sparklineStroke,
+                                       height: NotchLayout.sparklineStroke)
+                                .position(x: x(only, first: first.at, span: span),
+                                          y: y(only.fraction))
+                        } else {
+                            path(run, first: first.at, span: span)
+                                .stroke(color, style: StrokeStyle(
+                                    lineWidth: NotchLayout.sparklineStroke,
+                                    lineCap: .round, lineJoin: .round))
+                        }
+                    }
+                }
+            }
+            .frame(width: width, height: NotchLayout.sparklineHeight)
+            .padding(.top, NotchLayout.labelToBar)
+        }
+    }
+}
+
 /// One metered window: label and reset copy on a line, a track bar, then the
 /// percentage burned.
 private struct LimitWindowRow: View {
@@ -303,6 +386,11 @@ private struct ProviderTooltip: View {
                 ForEach(Array(snapshot.windows.enumerated()), id: \.element.id) { index, window in
                     LimitWindowRow(window: window, fidelity: snapshot.fidelity, now: now)
                         .padding(.top, index == 0 ? NotchLayout.headerToBlock : NotchLayout.blockSpacing)
+                }
+                // Same order the budget assumes: windows, history, sessions.
+                if NotchLayout.showsHistory(sampleCount: snapshot.history.count) {
+                    HistoryRow(snapshot: snapshot)
+                        .padding(.top, NotchLayout.blockSpacing)
                 }
             }
         }
@@ -442,7 +530,8 @@ struct TooltipCard: View {
             sessionCount: activity?.sessions.count ?? 0,
             sessionCap: sessionCap,
             statusMessage: snapshot.statusMessage,
-            blockMessage: snapshot.block?.summary(now: now)
+            blockMessage: snapshot.block?.summary(now: now),
+            showsHistory: NotchLayout.showsHistory(sampleCount: snapshot.history.count)
         )
     }
 

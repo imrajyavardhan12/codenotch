@@ -100,6 +100,16 @@ struct UsageBlock: Equatable, Sendable {
     }
 }
 
+/// One hourly point of a provider's headline number — what the ring showed,
+/// when. Sampled on successful fetches, never interpolated: hours the app was
+/// closed simply have no point, and the line breaks across them rather than
+/// inventing continuity nobody observed.
+struct UsageSample: Codable, Equatable, Sendable {
+    /// 0...1+ at the time, headline included.
+    let fraction: Double
+    let at: Date
+}
+
 struct ProviderSnapshot: Identifiable, Equatable, Sendable {
     let id: String
     let displayName: String
@@ -112,6 +122,11 @@ struct ProviderSnapshot: Identifiable, Equatable, Sendable {
     /// first", and a window dropping out of the response silently promotes
     /// another one — the ring keeps its shape and quietly changes its subject.
     var headlineID: String?
+    /// The headline's recent past, oldest first, for the history line. Rides
+    /// along rather than living beside the snapshot so every consumer —
+    /// tooltip today, whoever tomorrow — sees the same past with the same
+    /// present. Empty until enough successful fetches have accumulated.
+    var history: [UsageSample] = []
     /// Set when something is blocked right now. Deliberately separate from the
     /// windows: it is not a measurement, it is a door being shut.
     var block: UsageBlock?

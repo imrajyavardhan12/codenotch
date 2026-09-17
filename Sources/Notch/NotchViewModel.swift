@@ -295,6 +295,10 @@ final class NotchViewModel: ObservableObject {
     /// stack, half of it past each end, so the stack itself takes its share
     /// first. Along a horizontal edge the card hangs *inward* instead, and what
     /// it competes with is the depth already spent on the notch body and tail.
+    /// Exposed so the history trade-off test can hold the admitted card to
+    /// the same budget the cap was solved from, without restating it.
+    func cardBudgetForTesting(cellCount: Int) -> CGFloat { cardBudget(cellCount: cellCount) }
+
     private func cardBudget(cellCount: Int) -> CGFloat {
         if edge.isVertical {
             return screenSize.height

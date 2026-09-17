@@ -123,6 +123,26 @@ enum NotchLayout {
     static let tailLength    = Design.px(75)
     static let tailHeight    = Design.px(87)
     static let tailGap       = Design.px(28)    // tail tip -> notch body edge
+    // The history line. New — not in the design frame — so sized in its
+    // language: a caption in the card's body face, the frame's own
+    // label-to-bar gap, and a line tall enough to read slope at a glance
+    // without spending a session row on it.
+    static let sparklineHeight = Design.px(64)
+    static let sparklineStroke = Design.px(5)
+    /// Samples below this don't draw: a stub of a line is worse than no line,
+    /// and the layout below must know the same answer the view does. A line
+    /// needs room before it arrives, so the budgets below assume history
+    /// aboard — the sixth sample fills reserved space instead of pushing rows
+    /// off the clip.
+    static let historyMinimumSamples = 6
+    static func showsHistory(sampleCount: Int) -> Bool {
+        sampleCount >= historyMinimumSamples
+    }
+    /// Caption line, gap, spark. Matches the order HistoryRow draws in, so
+    /// the budget and the view cannot disagree.
+    static var historyBlockHeight: CGFloat {
+        cardBodyLineHeight + labelToBar + sparklineHeight
+    }
     static let barHeight     = Design.px(10.5)
     static let headerGap     = Design.px(17)    // glyph -> title
     static let headerToBlock = Design.px(21)
@@ -274,7 +294,8 @@ enum NotchLayout {
     static func cardHeight(windowCount: Int, sessionCount: Int = 0,
                            sessionCap: Int = defaultSessionCap,
                            statusMessage: String? = nil,
-                           blockMessage: String? = nil) -> CGFloat {
+                           blockMessage: String? = nil,
+                           showsHistory: Bool = false) -> CGFloat {
         let header = max(glyphSize, cardTitleLineHeight)
         var height = 2 * cardPadding + header
 
@@ -289,6 +310,11 @@ enum NotchLayout {
             height += headerToBlock
                 + CGFloat(windowCount) * block
                 + CGFloat(windowCount - 1) * blockSpacing
+            // After the windows, before the sessions — the same order the
+            // view draws in, so the budget matches the card exactly.
+            if showsHistory {
+                height += blockSpacing + historyBlockHeight
+            }
         } else {
             // The status message, at whatever height it actually wraps to.
             height += headerToBlock + bodyTextHeight(statusMessage ?? "")
@@ -361,9 +387,12 @@ enum NotchLayout {
         for n in 1...sessionCeiling {
             // Costed as though something were still hidden, so that admitting
             // the nth row can never be what pushes the summary line off the
-            // bottom of the card.
+            // bottom of the card. And costed with history aboard: the budget
+            // is for the tallest possible card, and a line that arrives later
+            // must find room reserved rather than push rows off the clip.
             let height = cardHeight(windowCount: windowCount,
-                                    sessionCount: n + 1, sessionCap: n)
+                                    sessionCount: n + 1, sessionCap: n,
+                                    showsHistory: true)
             guard height <= cardBudget else { break }
             fits = n
         }
@@ -386,7 +415,8 @@ enum NotchLayout {
     /// solved for.
     static func maxCardHeight(sessionCap: Int) -> CGFloat {
         cardHeight(windowCount: maxWindowCount,
-                   sessionCount: sessionCap + 1, sessionCap: sessionCap)
+                   sessionCount: sessionCap + 1, sessionCap: sessionCap,
+                   showsHistory: true)
     }
 
     static let defaultMaxCardHeight = maxCardHeight(sessionCap: defaultSessionCap)

@@ -840,14 +840,26 @@ final class SessionCapTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(model.sessionCap(cellCount: 4), 6)
     }
 
-    /// Even the shortest display Macs ship with lists at least what the fixed
-    /// cap used to, so solving for the screen never costs anyone a row.
-    @MainActor func testTheSmallestLaptopIsNoWorseOffThanTheFixedCap() {
+    /// The history line reserves room like everything else that draws, so on
+    /// the shortest display with a crowded notch it costs session rows: the
+    /// 13-inch Air with four providers lists two, where the history-free
+    /// budget listed four. That trade is explicit, not drift — sessions past
+    /// the cap are counted, while an unreserved line would clip the title —
+    /// and what the cap admits, budget included, still fits.
+    @MainActor func testTheSmallestLaptopTradesRowsForHistoryHonestly() {
         let model = NotchViewModel()
         model.edge = .right
         model.screenSize = CGSize(width: 1470, height: 956)   // 13-inch Air
-        XCTAssertGreaterThanOrEqual(model.sessionCap(cellCount: 4),
-                                    NotchLayout.defaultSessionCap)
+        let cap = model.sessionCap(cellCount: 4)
+        XCTAssertGreaterThanOrEqual(cap, 2)
+        let budget = model.cardBudgetForTesting(cellCount: 4)
+        XCTAssertLessThanOrEqual(
+            NotchLayout.cardHeight(windowCount: NotchLayout.maxWindowCount,
+                                   sessionCount: cap, sessionCap: cap,
+                                   showsHistory: true),
+            budget,
+            "the admitted card, history aboard, overflows its budget"
+        )
     }
 
     /// And the panel it implies still has to land on the screen.
