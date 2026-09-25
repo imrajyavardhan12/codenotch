@@ -116,6 +116,14 @@ Hover state is driven by a cursor monitor, not `NSTrackingArea` — the panel
 ignores mouse events until the cursor is over it, so tracking areas never
 see the crossing that would switch event handling on.
 
+A click on the open notch is a light hold (`PinSource.click`), released by
+clicking away or Esc with the pointer off the notch; the Keep-open menu item
+is an explicit hold that survives both, and only Settings or hiding clears
+it. The gesture used to pin unconditionally, which read as the notch
+locking itself — the rings are small targets, a click aimed at one lands
+beside it easily, and a pin has no drawn state. Do not re-add pinning to
+the click path without a visible cue and an equally discoverable exit.
+
 ## App composition
 
 `AppDelegate` wires it all: profiles → providers → store → controller, plus
