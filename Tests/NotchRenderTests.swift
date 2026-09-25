@@ -510,3 +510,118 @@ final class StaleAfterMarginTests: XCTestCase {
         XCTAssertGreaterThan(store.staleAfterForTesting, store.idleRefreshIntervalForTesting)
     }
 }
+
+/// A click on the open notch pins it with no visible cue, and afterwards the
+/// only clicks that reach the notch land on rings (which refetch) or the gear
+/// (which opens Settings) — neither unpins. Clicks anywhere else pass through
+/// the hole the panel leaves, and Esc does nothing. Reported as: the notch on
+/// the right edge sometimes gets stuck open, and only toggling Appearance in
+/// Settings makes it behave again.
+///
+/// The fix records how the pin was made. A click is a light hold: clicking
+/// anywhere else or Esc with the pointer off the notch releases it. The
+/// Keep-open menu item is an explicit hold and survives both.
+@MainActor
+final class ClickPinReleaseTests: XCTestCase {
+    private func snapshot(id: String) -> ProviderSnapshot {
+        ProviderSnapshot(
+            id: id, displayName: id, glyph: .claude,
+            fidelity: .official, status: .ok,
+            windows: [LimitWindow(id: "w", label: "Session", usedFraction: 0.4)],
+            headlineID: "w"
+        )
+    }
+
+    private func expandedController() -> NotchWindowController {
+        let controller = NotchWindowController()
+        controller.model.snapshots = [snapshot(id: "a"), snapshot(id: "b"), snapshot(id: "c")]
+        controller.model.isExpanded = true
+        return controller
+    }
+
+    /// A click elsewhere releases a click-pin…
+    func testClickAwayReleasesAClickPin() {
+        let controller = expandedController()
+        controller.togglePinnedByClick()
+        XCTAssertTrue(controller.model.isPinned)
+
+        let frame = CGRect(x: 100, y: 100, width: 200, height: 400)
+        XCTAssertTrue(controller.clickAwayShouldReleasePin(
+            click: CGPoint(x: 10, y: 10), panelFrame: frame))
+    }
+
+    /// …but a click inside the panel never does — that is ordinary use.
+    func testAClickInsideThePanelReleasesNothing() {
+        let controller = expandedController()
+        controller.togglePinnedByClick()
+
+        let frame = CGRect(x: 100, y: 100, width: 200, height: 400)
+        XCTAssertFalse(controller.clickAwayShouldReleasePin(
+            click: CGPoint(x: 150, y: 200), panelFrame: frame))
+    }
+
+    /// …and an explicit Keep-open survives clicks elsewhere, which is what
+    /// makes it explicit.
+    func testClickAwayNeverReleasesAnExplicitPin() {
+        let controller = expandedController()
+        controller.togglePinned()
+        XCTAssertTrue(controller.model.isPinned)
+
+        let frame = CGRect(x: 100, y: 100, width: 200, height: 400)
+        XCTAssertFalse(controller.clickAwayShouldReleasePin(
+            click: CGPoint(x: 10, y: 10), panelFrame: frame))
+        XCTAssertTrue(controller.model.isPinned)
+    }
+
+    /// Nothing to release when nothing is pinned.
+    func testClickAwayWithNoPinIsANoOp() {
+        let controller = expandedController()
+        let frame = CGRect(x: 100, y: 100, width: 200, height: 400)
+        XCTAssertFalse(controller.clickAwayShouldReleasePin(
+            click: CGPoint(x: 10, y: 10), panelFrame: frame))
+    }
+
+    /// Esc with the pointer far from the notch releases a click-pin…
+    func testEscapeOffTheNotchReleasesAClickPin() {
+        let controller = expandedController()
+        controller.togglePinnedByClick()
+
+        XCTAssertTrue(controller.escapeShouldReleasePin(
+            cursorLocal: CGPoint(x: 5000, y: 5000)))
+    }
+
+    /// …but Esc pressed while reading — pointer parked over the notch, e.g. a
+    /// Vim user suspending the editor — must not snatch the reading away.
+    func testEscapeOverTheNotchReleasesNothing() {
+        let controller = expandedController()
+        controller.togglePinnedByClick()
+
+        let inside = CGPoint(
+            x: controller.liveRectForTesting.midX,
+            y: controller.liveRectForTesting.midY)
+        XCTAssertTrue(controller.liveRectForTesting.contains(inside))
+        XCTAssertFalse(controller.escapeShouldReleasePin(cursorLocal: inside))
+    }
+
+    /// …and never an explicit Keep-open.
+    func testEscapeNeverReleasesAnExplicitPin() {
+        let controller = expandedController()
+        controller.togglePinned()
+
+        XCTAssertFalse(controller.escapeShouldReleasePin(
+            cursorLocal: CGPoint(x: 5000, y: 5000)))
+        XCTAssertTrue(controller.model.isPinned)
+    }
+
+    /// Switching visibility still clears either kind of pin — the Settings
+    /// toggle remains the universal reset it has always been.
+    func testSwitchingToHoverClearsAClickPinToo() {
+        let controller = expandedController()
+        controller.togglePinnedByClick()
+        controller.apply(.onHover)
+        XCTAssertFalse(controller.model.isPinned)
+        XCTAssertFalse(controller.clickAwayShouldReleasePin(
+            click: CGPoint(x: 0, y: 0),
+            panelFrame: CGRect(x: 100, y: 100, width: 200, height: 400)))
+    }
+}

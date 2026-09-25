@@ -40,6 +40,13 @@ final class NotchWindowController {
     /// twitchy rather than responsive.
     private let foldGrace: TimeInterval = 0.45
     private var foldWork: DispatchWorkItem?
+    /// How the current pin was made, when there is one. A click on the open
+    /// notch is a light hold — released by clicking away or Esc — while the
+    /// Keep-open menu item is an explicit hold that only a choice clears.
+    /// Without the distinction every stray click needed Settings to undo,
+    /// reported as the notch sticking open on the edge.
+    private enum PinSource { case click, explicit }
+    private var pinSource: PinSource?
     /// Whether we have pushed the pointing hand onto the cursor stack.
     private var isPointing = false
     /// The usable area the panel was last placed against.
@@ -279,6 +286,48 @@ final class NotchWindowController {
         }) {
             mouseMonitors.append(local)
         }
+
+        // A click-pinned notch has no visible cue and ring clicks refetch
+        // instead of unpinning, so without an exit it reads as stuck and only
+        // a Settings toggle clears it. A light hold therefore releases the
+        // way popovers do: a click anywhere else, or Esc with the pointer
+        // elsewhere, lets go. Monitors observe without consuming — Esc still
+        // reaches the app underneath — and an explicit Keep-open survives
+        // both, which is what makes it explicit.
+        let clickAway: (NSEvent) -> Void = { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.dismissClickPinIfAbandoned(at: NSEvent.mouseLocation, trigger: "click-away")
+            }
+        }
+        if let globalClick = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown, handler: clickAway) {
+            mouseMonitors.append(globalClick)
+        }
+        if let localClick = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown, handler: { event in
+            clickAway(event)
+            return event
+        }) {
+            mouseMonitors.append(localClick)
+        }
+        let esc: (NSEvent) -> Void = { [weak self] event in
+            MainActor.assumeIsolated {
+                guard event.keyCode == 53 else { return }
+                guard let self, let panel = self.panel else { return }
+                guard self.escapeShouldReleasePin(cursorLocal: self.localCursor(in: panel.frame)) else { return }
+                Log.usage.info("click-pin released by Escape")
+                self.pinSource = nil
+                self.model.isPinned = false
+                self.cursorMoved()
+            }
+        }
+        if let globalKey = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: esc) {
+            mouseMonitors.append(globalKey)
+        }
+        if let localKey = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { event in
+            esc(event)
+            return event
+        }) {
+            mouseMonitors.append(localKey)
+        }
     }
 
     private func localCursor(in frame: CGRect) -> CGPoint {
@@ -419,7 +468,7 @@ final class NotchWindowController {
             onRefreshProvider?(model.snapshots[index].id)
             return
         }
-        togglePinned()
+        togglePinnedByClick()
     }
 
     /// Move the notch to another screen edge.
@@ -497,13 +546,18 @@ final class NotchWindowController {
             // Any pin made by hand is subsumed by the setting; leaving it set
             // would outlive a later switch back to hover.
             model.isPinned = false
+            pinSource = nil
             foldWork?.cancel()
             foldWork = nil
             withAnimation(NotchMotion.unfold) { model.isExpanded = true }
         case .onHover:
             panel?.orderFrontRegardless()
             model.isAlwaysOn = false
+            if pinSource != nil {
+                Log.usage.info("pin cleared by visibility change")
+            }
             model.isPinned = false
+            pinSource = nil
             // Fold now rather than waiting for the pointer to leave: it may
             // already be somewhere else, in which case nothing would arrive to
             // close it and "on hover" would look exactly like "always show".
@@ -514,6 +568,7 @@ final class NotchWindowController {
         case .hidden:
             model.isAlwaysOn = false
             model.isPinned = false
+            pinSource = nil
             model.isExpanded = false
             model.hoveredIndex = nil
             // Ordered out rather than made transparent. An invisible panel that
@@ -530,14 +585,63 @@ final class NotchWindowController {
     /// held open by a standing choice, and letting a click release it meant
     /// the setting said one thing and the notch did another.
     func togglePinned() {
+        setPinned(!model.isPinned, source: .explicit, trigger: "menu")
+    }
+
+    /// The click path records a light hold: clicking away or Esc releases it,
+    /// an explicit Keep-open does not get released from under the user.
+    /// Internal rather than private so tests can pin the way a click does.
+    func togglePinnedByClick() {
+        setPinned(!model.isPinned, source: .click, trigger: "click")
+    }
+
+    private func setPinned(_ pinned: Bool, source: PinSource, trigger: String) {
         guard !model.isAlwaysOn else { return }
-        model.isPinned.toggle()
-        if model.isPinned {
+        let was = model.isPinned
+        model.isPinned = pinned
+        if pinned {
+            pinSource = source
             foldWork?.cancel()
             foldWork = nil
             withAnimation(NotchMotion.unfold) { model.isExpanded = true }
+        } else {
+            pinSource = nil
+        }
+        if pinned != was {
+            Log.usage.info("notch \(pinned ? "pinned" : "unpinned") via \(trigger, privacy: .public)")
         }
         updateInteractiveRects()
+    }
+
+    /// The live region for tests that need to place the cursor inside or
+    /// outside it without reaching into AppKit geometry.
+    var liveRectForTesting: CGRect { liveRect }
+
+    /// Whether a click at a screen point releases the pin. Pure geometry so
+    /// tests can drive it; the live monitors supply the event's location.
+    /// Only a light (click) hold releases — an explicit Keep-open survives
+    /// clicks elsewhere, which is what makes it explicit.
+    func clickAwayShouldReleasePin(click: CGPoint, panelFrame: CGRect) -> Bool {
+        guard model.isPinned, pinSource == .click else { return false }
+        return !panelFrame.contains(click)
+    }
+
+    /// Whether Esc with the cursor at a panel-local point releases the pin.
+    /// The cursor has to be off the notch itself: Esc pressed while reading
+    /// (pointer parked over the card, e.g. a Vim user suspending the editor)
+    /// must not snatch the reading away.
+    func escapeShouldReleasePin(cursorLocal: CGPoint) -> Bool {
+        guard model.isPinned, pinSource == .click else { return false }
+        return !liveRect.contains(cursorLocal)
+    }
+
+    private func dismissClickPinIfAbandoned(at screenPoint: CGPoint, trigger: String) {
+        guard let panel else { return }
+        guard clickAwayShouldReleasePin(click: screenPoint, panelFrame: panel.frame) else { return }
+        Log.usage.info("click-pin released by \(trigger, privacy: .public)")
+        pinSource = nil
+        model.isPinned = false
+        cursorMoved()
     }
 
     private func cellIndex(along: CGFloat) -> Int? {
