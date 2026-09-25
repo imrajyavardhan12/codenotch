@@ -35,6 +35,23 @@ cli: gen
 
 # Installs the CLI onto PATH. PREFIX defaults to /usr/local (via `sudo`);
 # Homebrew users will want `make install-cli PREFIX=/opt/homebrew`.
+# Installs a stable copy in /Applications for daily use. `make run` launches
+# a build that lives in DerivedData — macOS will not relaunch it after a
+# restart, and Xcode may clean it any time — so a reboot is exactly what makes
+# the app "vanish". Installed here, it is a normal app: launch it once from
+# Spotlight or Finder, switch on "Open at login" in Settings, and use this
+# copy day to day. Rebuild with `make run` only when testing new changes,
+# then `make install` again to carry them over. (Each reinstall is a fresh
+# ad-hoc identity, so the keychain asks once more afterwards — the documented
+# price of developing without a paid membership.)
+install: build
+	@APP=$$(xcodebuild -project $(PROJECT) -scheme $(SCHEME) -destination '$(DEST)' \
+		-configuration Debug -showBuildSettings 2>/dev/null \
+		| awk -F' = ' '/ BUILT_PRODUCTS_DIR/ {print $$2; exit}')/Codenotch.app; \
+	rm -rf /Applications/Codenotch.app; \
+	cp -R "$$APP" /Applications/Codenotch.app; \
+	echo "Installed to /Applications/Codenotch.app — launch it once, then switch on \"Open at login\" in Settings."
+
 PREFIX ?= /usr/local
 install-cli: cli
 	@BIN=$$(xcodebuild -project $(PROJECT) -target CodenotchCLI -destination '$(DEST)' \

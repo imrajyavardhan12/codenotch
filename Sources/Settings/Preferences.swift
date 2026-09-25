@@ -161,6 +161,23 @@ final class Preferences: ObservableObject {
         // Read from the system rather than from our own store: the user can turn
         // this off in System Settings, and a remembered `true` would then be a lie.
         self.launchAtLogin = Self.isRegisteredForLogin
+        // One-time sweep for flags orphaned before removal cleared them:
+        // a "manual-…" id with no matching declaration is litter from a
+        // deleted custom limit, not a choice. Real provider ids are left
+        // alone — only the manual prefix (see ManualProvider.isManual) is pruned.
+        // Note the two id shapes: declarations are "abc", the disconnected
+        // set holds provider ids ("manual-abc"). Runs here, after every
+        // stored property is set, so it may read self freely.
+        let declared = Set(self.manualLimits.map { "manual-" + $0.id })
+        let pruned = self.disconnectedProviders.filter { id in
+            guard id.hasPrefix("manual-") else { return true }
+            return declared.contains(id)
+        }
+        if pruned != self.disconnectedProviders {
+            self.disconnectedProviders = pruned
+            // didSet does not fire inside init, so persist explicitly.
+            defaults.set(Array(pruned), forKey: Keys.disconnected)
+        }
     }
 
     func manualLimit(id: String) -> ManualLimit? {
@@ -178,6 +195,12 @@ final class Preferences: ObservableObject {
 
     func removeManualLimit(id: String) {
         manualLimits.removeAll { $0.id == id }
+        // The disconnected flag is a separate set holding the *provider* id
+        // ("manual-abc", not "abc"): deleting the declaration without
+        // clearing it leaves a stale entry that grows with every add/delete
+        // cycle and outlives what it referred to.
+        disconnectedProviders.remove("manual-" + id)
+        disconnectedProviders.remove(id)
     }
 
     func isConnected(_ providerID: String) -> Bool {

@@ -142,11 +142,30 @@ final class ManualPreferencesTests: XCTestCase {
         edited.used = 700
         prefs.updateManualLimit(edited)
         XCTAssertEqual(prefs.manualLimit(id: "abc")?.used, 700)
+        prefs.setConnected(false, for: "manual-abc")
         prefs.removeManualLimit(id: "abc")
         XCTAssertTrue(prefs.manualLimits.isEmpty)
+        // Deleting the declaration clears its disconnected flag too —
+        // otherwise every add/delete cycle leaves a stale entry behind.
+        // Note the two id shapes: the set holds "manual-abc", not "abc".
+        XCTAssertTrue(prefs.isConnected("manual-abc"))
         // Removing what is not there is a no-op, not a crash.
         prefs.removeManualLimit(id: "nope")
         prefs.updateManualLimit(edited)
+    }
+
+    func testRelaunchPrunesOrphanedManualFlags() {
+        let (prefs, defaults) = preferences()
+        prefs.addManualLimit(limit())
+        prefs.setConnected(false, for: "manual-abc")
+        prefs.setConnected(false, for: "cursor")
+        // Simulate a store written before removal cleared the flag: the
+        // orphan has the provider-id shape ("manual-…"), real toggles stay.
+        defaults.set(["manual-abc", "manual-orphan", "cursor"], forKey: "hiddenProviders")
+        let relaunched = Preferences(defaults: defaults)
+        XCTAssertFalse(relaunched.isConnected("manual-abc"))
+        XCTAssertFalse(relaunched.isConnected("cursor"))
+        XCTAssertTrue(relaunched.isConnected("manual-orphan"))
     }
 
     func testACorruptArrayDecodesToEmpty() {
