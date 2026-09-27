@@ -81,6 +81,74 @@ final class ClaudeOAuthProviderTests: XCTestCase {
                        "the provider stopped asking after the first failure")
     }
 
+    /// An expired held token is served without a keychain re-read.
+    ///
+    /// The field report: a macOS access prompt every hour or two, answered
+    /// with Always Allow every time. Claude rotates hourly, and the provider
+    /// re-read the keychain on every expiry — each re-read of another app's
+    /// item another dialogue, for a token that usually still worked. The
+    /// endpoint is the judge now: one request proves more than any timestamp.
+    func testAnExpiredHeldTokenIsServedWithoutAKeychainReread() async throws {
+        StubEndpoint.reset([
+            .init(status: 200, body: Self.usagePayload),
+            .init(status: 200, body: Self.usagePayload)
+        ])
+        let source = CredentialSource(readable: true)
+        let provider = makeProvider(source: source)
+
+        _ = try await provider.fetchSnapshot()
+        XCTAssertEqual(source.reads, 1)
+
+        source.expire()   // the hourly rotation, without the hour
+
+        let snapshot = try await provider.fetchSnapshot()
+        XCTAssertEqual(snapshot.status, .ok)
+        XCTAssertEqual(source.reads, 1,
+                       "expiry alone sent it back to the keychain — the hourly prompt")
+        XCTAssertEqual(StubEndpoint.requestCount, 2,
+                       "the expired token never reached the endpoint")
+    }
+
+    /// …but a token the endpoint actually rejects still escapes to the
+    /// keychain exactly once, then reports honestly.
+    func testARejectedExpiredTokenStillReloadsOnce() async {
+        StubEndpoint.reset([
+            .init(status: 200, body: Self.usagePayload),
+            .init(status: 401),
+            .init(status: 401)
+        ])
+        let source = CredentialSource(readable: true)
+        let provider = makeProvider(source: source)
+
+        _ = try? await provider.fetchSnapshot()
+        source.expire()
+
+        // The held token goes out, comes back 401, and the one re-read finds
+        // only an expired rotation: expired, not signed out. Either error is
+        // honest here; the count is the assertion.
+        _ = try? await provider.fetchSnapshot()
+        XCTAssertEqual(source.reads, 2,
+                       "a real rejection must re-read once — no more, no less")
+    }
+
+    /// The account row must not re-read either: it runs every refresh cycle
+    /// and only shows the plan, which rotation does not change.
+    func testAccountServesTheRememberedPlanWithoutRereading() async throws {
+        StubEndpoint.reset([.init(status: 200, body: Self.usagePayload)])
+        let source = CredentialSource(readable: true)
+        let provider = makeProvider(source: source)
+
+        _ = try await provider.fetchSnapshot()
+        XCTAssertEqual(provider.account()?.plan, "max")
+        XCTAssertEqual(source.reads, 1)
+
+        source.expire()
+
+        XCTAssertEqual(provider.account()?.plan, "max")
+        XCTAssertEqual(source.reads, 1,
+                       "the account row went back to the keychain on rotation")
+    }
+
     // MARK: - Helpers
 
     private static let usagePayload = Data("""
@@ -120,8 +188,18 @@ private final class CredentialSource: @unchecked Sendable {
     private let lock = NSLock()
     private var readable: Bool
     private var readCount = 0
+    private var expiry: Date
 
-    init(readable: Bool) { self.readable = readable }
+    init(readable: Bool, expiresAt: Date = .distantFuture) {
+        self.readable = readable
+        self.expiry = expiresAt
+    }
+
+    /// What the source serves from now on — lapse it to simulate the hourly
+    /// rotation without waiting out a real token lifetime.
+    func expire() {
+        lock.lock(); expiry = Date(timeIntervalSince1970: 0); lock.unlock()
+    }
 
     var reads: Int {
         lock.lock(); defer { lock.unlock() }
@@ -136,13 +214,14 @@ private final class CredentialSource: @unchecked Sendable {
         lock.lock()
         readCount += 1
         let allowed = readable
+        let expiresAt = expiry
         lock.unlock()
 
         // The shape a dark-wake or not-found read takes by the time it leaves
         // `ClaudeCredentials.read()`.
         guard allowed else { throw UsageProviderError.needsAuth }
         return ClaudeCredentials(accessToken: "token",
-                                 expiresAt: .distantFuture,
+                                 expiresAt: expiresAt,
                                  subscriptionType: "max")
     }
 }

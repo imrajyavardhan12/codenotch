@@ -38,6 +38,13 @@ actor ClaudeOAuthProvider: UsageProvider {
     /// never expired shipped. Production reads through this profile's own
     /// `ClaudeKeychain`; a test substitutes a fake credential source instead.
     private let loadCredentials: @Sendable () throws -> ClaudeCredentials
+    /// The last plan seen on a fresh load, for `account()` to serve without
+    /// touching the loader. `account()` is nonisolated and runs every refresh
+    /// cycle, so reading through the loader there re-read the keychain on
+    /// every rotation — the same hourly prompt the fetch path just learned
+    /// not to cause. The plan changes on subscribe/cancel, not on rotation,
+    /// so a copy refreshed on every real load is fresh enough.
+    private nonisolated let lastPlan = LockedValue<String?>(nil)
 
     init(profile: ClaudeProfile = .default(),
          session: URLSession = .shared,
@@ -142,7 +149,15 @@ actor ClaudeOAuthProvider: UsageProvider {
     }
 
     private func currentToken() throws -> String {
-        if let credentials, !credentials.isExpired {
+        // Serve the held token even past its stamped expiry and let the
+        // endpoint prove rejection. Claude rotates hourly, and re-reading the
+        // keychain on every expiry is what surfaces macOS's access prompt
+        // over and over: each re-read of another app's item is another
+        // dialogue, for a token that usually still works. A genuinely dead
+        // token comes back 401/403, which already clears the held copy and
+        // re-reads once — so a real sign-out is no slower, and the steady
+        // state stops touching the keychain entirely.
+        if let credentials {
             return credentials.accessToken
         }
         // No local back-off lock here — `CredentialCache`, behind `keychain`,
@@ -152,6 +167,7 @@ actor ClaudeOAuthProvider: UsageProvider {
         // be wrong, and was — it stamped itself on every failed tick, so its
         // own window never expired and the keychain was never read again.
         let fresh = try loadCredentials()
+        lastPlan.set(fresh.subscriptionType)
         Log.usage.debug("\(self.id, privacy: .public): read keychain token, expires \(fresh.expiresAt, privacy: .public)")
         // Expired is not signed out. Claude Code rotates this token whenever it
         // runs, and this app deliberately does not — minting one would mean
@@ -203,14 +219,32 @@ actor ClaudeOAuthProvider: UsageProvider {
                   + "the token this reads. Use /login there to change account.")
     }
 
-    nonisolated func forgetCachedCredential() { keychain.forgetCached() }
+    nonisolated func forgetCachedCredential() {
+        keychain.forgetCached()
+        lastPlan.set(nil)
+    }
 
     /// Through the injected loader rather than straight at the keychain, so a
     /// test can substitute a fake source: reading the real item puts a
     /// keychain prompt in front of whoever runs the suite. Production passes
     /// no substitute, so this still reads what the next fetch will use.
+    ///
+    /// Prefers the remembered plan: this runs every refresh cycle, and the
+    /// loader re-reads the keychain whenever the item has rotated since the
+    /// last read — the hourly prompt, from a row of UI that only shows the
+    /// plan. The fetch path refreshes the memory on every real load, so the
+    /// fallback below runs only before the first one.
     nonisolated func account() -> ProviderAccount? {
+        if let plan = lastPlan.value {
+            return ProviderAccount(
+                label: nil,   // the credential carries no address
+                plan: plan,
+                source: profile.sourceName,
+                manageURL: URL(string: "https://claude.ai/settings/usage")
+            )
+        }
         guard let credentials = try? loadCredentials() else { return nil }
+        lastPlan.set(credentials.subscriptionType)
         return ProviderAccount(
             label: nil,   // the credential carries no address
             plan: credentials.subscriptionType,
@@ -313,5 +347,24 @@ struct UsageResponse: Decodable {
         }
         let (ra, rb) = (rank(a.id), rank(b.id))
         return ra == rb ? a.id < b.id : ra < rb
+    }
+}
+
+/// A lock-guarded box for sharing one value between isolated and nonisolated
+/// code without a data race. `NSLock`, not the new `Mutex`: the floor here is
+/// older than `Synchronization`.
+final class LockedValue<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Value
+
+    init(_ value: Value) { self.stored = value }
+
+    var value: Value {
+        lock.lock(); defer { lock.unlock() }
+        return stored
+    }
+
+    func set(_ value: Value) {
+        lock.lock(); stored = value; lock.unlock()
     }
 }
