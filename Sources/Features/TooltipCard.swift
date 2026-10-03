@@ -189,15 +189,16 @@ private struct StatusRing: View {
                     // "in progress" without anything moving.
                     ring(trim: 0.75)
                 } else {
-                    // A timeline rather than `repeatForever`. An endless
-                    // animation has to be cancelled to stop, and setting the
-                    // value it is already heading towards does not cancel it —
-                    // which is exactly how the refresh ring here once span for
-                    // ever. Derived from the clock, it simply stops being drawn.
-                    TimelineView(.animation) { context in
-                        ring(trim: 0.75)
-                            .rotationEffect(.degrees(angle(at: context.date)))
-                    }
+                    // Core Animation, not `TimelineView(.animation)`: that
+                    // re-evaluated this view every frame to change an angle.
+                    // Like the timeline before it, an endless layer animation
+                    // simply goes away with the view, so a ring that finishes
+                    // cannot be left spinning.
+                    LayerArc(color: color,
+                             radius: NotchLayout.statusDot / 2,
+                             lineWidth: NotchLayout.statusDotStroke,
+                             fraction: 0.75,
+                             motion: .spin(period: Self.period))
                 }
             case .waiting:
                 // Half a ring, held still: blocked, not progressing.
@@ -216,11 +217,6 @@ private struct StatusRing: View {
                     style: StrokeStyle(lineWidth: NotchLayout.statusDotStroke, lineCap: .round))
             // Start the gap at the top, where the eye lands first.
             .rotationEffect(.degrees(-90))
-    }
-
-    private func angle(at date: Date) -> Double {
-        let turns = date.timeIntervalSinceReferenceDate / Self.period
-        return turns.truncatingRemainder(dividingBy: 1) * 360
     }
 }
 

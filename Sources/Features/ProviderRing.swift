@@ -104,61 +104,36 @@ struct ProviderRing: View {
 
 /// The inner indicator: a short arc that spins while work is happening, and a
 /// full pulsing ring when something is blocked waiting on you.
+///
+/// Both run as Core Animation animations (see `LayerArc`), not SwiftUI ones:
+/// a `repeatForever` here re-ran the view graph every frame and was most of the
+/// open notch's CPU.
 private struct ActivityArc: View {
     let summary: ActivitySummary
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var spinning = false
-    @State private var pulsing = false
 
     /// How much of the circle the moving arc covers.
     private let arcFraction: CGFloat = 0.25
 
-    private var inset: CGFloat {
-        (NotchLayout.ringDiameter - NotchLayout.activityDiameter) / 2
-    }
+    private var radius: CGFloat { NotchLayout.activityDiameter / 2 }
 
     var body: some View {
         Group {
             switch summary.state {
-            case .working: spinner
-            case .waiting: pulse
-            case .idle:    EmptyView()
+            case .working:
+                LayerArc(color: summary.color, radius: radius,
+                         lineWidth: NotchLayout.activityStroke, fraction: arcFraction,
+                         motion: reduceMotion ? .still : .spin(period: 1.1))
+            case .waiting:
+                LayerArc(color: summary.color, radius: radius,
+                         lineWidth: NotchLayout.activityStroke, fraction: 1,
+                         motion: reduceMotion ? .still : .pulse(period: 0.9, low: 0.3))
+            case .idle:
+                EmptyView()
             }
         }
         .frame(width: NotchLayout.ringDiameter, height: NotchLayout.ringDiameter)
-    }
-
-    private var spinner: some View {
-        Circle()
-            .inset(by: inset)
-            .trim(from: 0, to: arcFraction)
-            .stroke(
-                summary.color,
-                style: StrokeStyle(lineWidth: NotchLayout.activityStroke, lineCap: .round)
-            )
-            .rotationEffect(.degrees(spinning ? 360 : 0))
-            .onAppear {
-                guard !reduceMotion else { return }
-                withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) {
-                    spinning = true
-                }
-            }
-            .onDisappear { spinning = false }
-    }
-
-    private var pulse: some View {
-        Circle()
-            .inset(by: inset)
-            .stroke(summary.color, lineWidth: NotchLayout.activityStroke)
-            .opacity(pulsing ? 0.3 : 1)
-            .onAppear {
-                guard !reduceMotion else { return }
-                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
-                    pulsing = true
-                }
-            }
-            .onDisappear { pulsing = false }
     }
 }
 
