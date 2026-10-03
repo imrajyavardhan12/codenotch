@@ -106,6 +106,17 @@ final class CredentialCache<Credential>: @unchecked Sendable {
             lastError = nil
             lock.unlock()
             return fresh
+        } catch let transient as TransientCredentialFailure {
+            // Says nothing about this version of the item, so it is not
+            // recorded against its stamp — that would hold the answer until
+            // the owner next rotated, hours away. Remembered against the clock
+            // instead, so it is retried after `retryAfterFailure`.
+            lock.lock()
+            attemptedStamp = nil
+            attemptedAt = now()
+            lastError = transient.surfaced
+            lock.unlock()
+            throw transient.surfaced
         } catch {
             lock.lock()
             // The attempt is recorded, the credential is not: a failure must
@@ -132,4 +143,12 @@ final class CredentialCache<Credential>: @unchecked Sendable {
         lastError = nil
         lock.unlock()
     }
+}
+
+/// A read that failed for a reason unrelated to the item — the Mac in dark
+/// wake, where no dialogue can be shown. `CredentialCache` retries it after a
+/// short wait rather than treating it as the item's answer; callers see only
+/// `surfaced`.
+struct TransientCredentialFailure: Error {
+    let surfaced: Error
 }

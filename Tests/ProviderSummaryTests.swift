@@ -88,6 +88,23 @@ final class ProviderSummaryTests: XCTestCase {
 
     // MARK: - Helpers
 
+    /// Opening Settings must not read a switched-off provider's credential.
+    /// `account()` is that read, and for Antigravity it touched the keychain
+    /// on every open, for a row that says only "Signed out".
+    func testASwitchedOffProviderIsNotAskedForItsAccount() {
+        let provider = SwitchableProvider(outcome: .success)
+        let store = makeStore(provider)
+        store.disconnected = [provider.id]
+
+        let summary = store.providerSummaries.first
+        XCTAssertNil(summary?.account)
+        XCTAssertEqual(provider.accountReads, 0)
+
+        store.disconnected = []
+        _ = store.providerSummaries
+        XCTAssertEqual(provider.accountReads, 1, "a connected provider's account is still read")
+    }
+
     private func makeStore(_ provider: SwitchableProvider) -> UsageStore {
         let name = "ProviderSummaryTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!
@@ -125,7 +142,8 @@ private final class SwitchableProvider: UsageProvider, @unchecked Sendable {
             )
         }
     }
-    func account() -> ProviderAccount? { nil }
+    private(set) var accountReads = 0
+    func account() -> ProviderAccount? { accountReads += 1; return nil }
     nonisolated var signInRoute: SignInRoute { .guidance("—") }
     func signOut() async {}
     func presentSignIn() {}

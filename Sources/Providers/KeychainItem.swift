@@ -28,6 +28,9 @@ enum KeychainItem {
     /// it, and a handle that can fetch its data later without searching again.
     struct Match {
         let modifiedAt: Date?
+        /// The item's account attribute — what `/usr/bin/security` needs,
+        /// alongside the service, to fetch this item rather than a sibling.
+        var account: String? = nil
         /// Opaque to everything but `SecItemCopyMatching`. Reading the item
         /// this points at is the one call that can prompt; enumerating to find
         /// it, like reading `modifiedAt`, never does.
@@ -67,7 +70,9 @@ enum KeychainItem {
         items
             .compactMap { item -> Match? in
                 guard let ref = item[kSecValuePersistentRef] as? Data else { return nil }
-                return Match(modifiedAt: item[kSecAttrModificationDate] as? Date, persistentRef: ref)
+                return Match(modifiedAt: item[kSecAttrModificationDate] as? Date,
+                             account: item[kSecAttrAccount] as? String,
+                             persistentRef: ref)
             }
             // A duplicate with no modification date is possible in principle
             // and worth keeping rather than discarding; `.distantPast` only

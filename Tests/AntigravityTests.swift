@@ -489,6 +489,36 @@ final class CredentialCacheTests: XCTestCase {
         XCTAssertEqual(reads, 3, "Allow access… could not reach the keychain")
     }
 
+    /// A dark wake is not the item's answer. Recorded against the stamp, it
+    /// held the ring stale until the owner next rotated the token — hours.
+    /// Retried after the failure wait instead, with the same stamp.
+    func testATransientFailureIsRetriedWithoutTheItemChanging() {
+        var reads = 0
+        var clock = Date(timeIntervalSince1970: 0)
+        let stamp = Date(timeIntervalSince1970: 1_000)
+        let cache = CredentialCache<Token>(now: { clock }) { $0.expired }
+
+        XCTAssertThrowsError(try cache.value(itemModifiedAt: { stamp }) { () -> Token in
+            reads += 1
+            throw TransientCredentialFailure(surfaced: UsageProviderError.needsAuth)
+        }) { error in
+            guard case UsageProviderError.needsAuth = error else {
+                return XCTFail("the caller should see the surfaced error, got \(error)")
+            }
+        }
+
+        // Within the wait: the same answer, no second read.
+        clock.addTimeInterval(60)
+        XCTAssertThrowsError(try cache.value(itemModifiedAt: { stamp }) { reads += 1; return Token(expired: false) })
+        XCTAssertEqual(reads, 1)
+
+        // Past it: read again, though the item never changed.
+        clock.addTimeInterval(5 * 60)
+        let token = try? cache.value(itemModifiedAt: { stamp }) { reads += 1; return Token(expired: false) }
+        XCTAssertEqual(reads, 2)
+        XCTAssertNotNil(token)
+    }
+
     /// The case this exists for: a different account is signed into, the server
     /// rejects a token that has not expired, and the held copy has to go.
     func testForgettingForcesAFreshRead() {

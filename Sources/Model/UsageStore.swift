@@ -144,10 +144,18 @@ final class UsageStore: ObservableObject {
     }
 
     /// Enough to list the providers in settings without exposing them.
+    ///
+    /// A switched-off provider's account is not asked for: `account()` reads
+    /// the provider's credential, which for a keychain-backed one means
+    /// touching another app's item every time Settings opens — for a row that
+    /// shows only "Signed out". Manual limits are the exception: they read no
+    /// credential, and their row shows the declaration even while paused.
     var providerSummaries: [ProviderSummary] {
         allProviders.map { provider in
-            ProviderSummary(id: provider.id, name: provider.displayName,
-                            glyph: provider.glyph, account: provider.account(),
+            let readsAccount = !disconnected.contains(provider.id)
+                || ManualProvider.isManual(id: provider.id)
+            return ProviderSummary(id: provider.id, name: provider.displayName,
+                            glyph: provider.glyph, account: readsAccount ? provider.account() : nil,
                             signIn: provider.signInRoute,
                             wasRefusedAccess: refusedAccess.contains(provider.id))
         }

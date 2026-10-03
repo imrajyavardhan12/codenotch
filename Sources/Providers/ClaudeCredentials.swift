@@ -40,12 +40,27 @@ struct ClaudeCredentials {
     /// to the one that was picked. `KeychainItem.newest` finds it via
     /// attributes and a persistent reference, neither of which needs
     /// authorization to read — only this second, targeted fetch of the
-    /// winner's actual data does, which is why it costs the same single prompt
-    /// as before, per profile.
+    /// winner's actual data does.
+    ///
+    /// That fetch goes through `/usr/bin/security` first, which never prompts
+    /// for an item Claude Code wrote — see `SecurityTool` for why a direct read
+    /// prompted after every token refresh despite Always Allow. The direct read
+    /// below is only the fallback for when the tool itself cannot run.
     static func read(service: String) throws -> ClaudeCredentials {
         guard let winner = KeychainItem.newest(service: service) else {
             Log.usage.error("keychain read failed: no item under \(service, privacy: .public)")
             throw UsageProviderError.needsAuth
+        }
+
+        switch SecurityTool.read(service: service, account: winner.account) {
+        case .secret(let data):
+            return try decode(data)
+        case .notFound:
+            // Gone between enumeration and this read: Claude Code rotating at
+            // the exact wrong instant, or signing out.
+            throw UsageProviderError.needsAuth
+        case .failed:
+            break
         }
 
         var item: CFTypeRef?
@@ -63,11 +78,13 @@ struct ClaudeCredentials {
             // -128 (user cancelled) mean it is there and this app is not on its
             // access list. Those need very different advice, so record which.
             Log.usage.error("keychain read of \(service, privacy: .public) failed: OSStatus \(status) (\(Self.explain(status), privacy: .public))")
-            throw Self.wasRefused(status)
-                ? UsageProviderError.accessDenied
-                : UsageProviderError.needsAuth
+            throw Self.failure(for: status)
         }
+        return try decode(data)
+    }
 
+    /// The stored JSON, wherever it was read from.
+    static func decode(_ data: Data) throws -> ClaudeCredentials {
         struct Payload: Decodable {
             struct OAuth: Decodable {
                 let accessToken: String
@@ -105,9 +122,24 @@ struct ClaudeCredentials {
             || status == errSecInteractionNotAllowed
     }
 
+    /// What a failed direct read should surface as.
+    ///
+    /// A dark wake is neither a refusal nor a missing item: the Mac is half
+    /// asleep and no dialogue can be shown, so the same read will work once it
+    /// is awake. Remembering it as an answer about this version of the item is
+    /// what left the ring stale until Claude Code next rotated the token, so it
+    /// is marked transient and retried after a short wait instead.
+    static func failure(for status: OSStatus) -> Error {
+        if status == errSecInDarkWake {
+            return TransientCredentialFailure(surfaced: UsageProviderError.needsAuth)
+        }
+        return wasRefused(status) ? UsageProviderError.accessDenied : UsageProviderError.needsAuth
+    }
+
     static func explain(_ status: OSStatus) -> String {
         switch status {
         case errSecItemNotFound:          return "no such item — Claude Code has not signed in"
+        case errSecInDarkWake:            return "the Mac is in dark wake; no dialogue can be shown"
         case errSecInteractionNotAllowed: return "access not permitted without interaction"
         case errSecUserCanceled:          return "the access prompt was dismissed or denied"
         case errSecAuthFailed:            return "authorisation failed"

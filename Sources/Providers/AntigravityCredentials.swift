@@ -34,7 +34,20 @@ struct AntigravityCredentials {
         )
     }
 
+    /// Through `/usr/bin/security` first, for the reason `SecurityTool` gives:
+    /// Go's `keyring` writes with that tool, so every rewrite drops Always
+    /// Allow and a direct read would prompt again.
     private static func read() throws -> AntigravityCredentials {
+        switch SecurityTool.read(service: service, account: account) {
+        case .secret(let data):
+            guard let decoded = decode(data) else { throw UsageProviderError.needsAuth }
+            return decoded
+        case .notFound:
+            throw UsageProviderError.needsAuth
+        case .failed:
+            break
+        }
+
         var item: CFTypeRef?
         let status = SecItemCopyMatching([
             kSecClass: kSecClassGenericPassword,
@@ -46,9 +59,7 @@ struct AntigravityCredentials {
 
         guard status == errSecSuccess, let data = item as? Data else {
             Log.usage.error("antigravity keychain read failed: OSStatus \(status)")
-            throw ClaudeCredentials.wasRefused(status)
-                ? UsageProviderError.accessDenied
-                : UsageProviderError.needsAuth
+            throw ClaudeCredentials.failure(for: status)
         }
 
         guard let decoded = decode(data) else { throw UsageProviderError.needsAuth }
