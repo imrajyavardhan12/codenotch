@@ -20,6 +20,13 @@ struct ProviderRing: View {
     var activity: ActivitySummary?
     /// A fetch this cell asked for, in flight.
     var isRefreshing: Bool = false
+    /// Whether anyone can see this ring. The notch folds by fading its cells to
+    /// nothing, not by removing them, so a ring is still in the tree — and its
+    /// activity arc still animating — while folded shut, which is most of the
+    /// time. A `repeatForever` animation costs a layout pass every frame whether
+    /// or not it is seen: with one agent working it was the whole of the app's
+    /// idle CPU, around 4% of a core, spent drawing nothing.
+    var isVisible: Bool = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var spin: Double = 0
@@ -64,8 +71,9 @@ struct ProviderRing: View {
             }
             .opacity(isStale ? 0.45 : 1)
 
-            if let activity, activity.state != .idle {
+            if let activity, activity.state != .idle, isVisible {
                 ActivityArc(summary: activity)
+                    .transition(.opacity)
             }
         }
         .frame(width: NotchLayout.ringDiameter, height: NotchLayout.ringDiameter)
@@ -159,6 +167,7 @@ struct ProviderCell: View {
     let snapshot: ProviderSnapshot
     var activity: ActivitySummary?
     var isRefreshing: Bool = false
+    var isVisible: Bool = true
 
     /// A dash, not "0%": nothing read is not the same as nothing used.
     private var percentText: String {
@@ -173,7 +182,8 @@ struct ProviderCell: View {
                 isStale: snapshot.status.isStale || !snapshot.hasReading,
                 isBlocked: snapshot.block != nil,
                 activity: activity,
-                isRefreshing: isRefreshing
+                isRefreshing: isRefreshing,
+                isVisible: isVisible
             )
             Text(percentText)
                 .font(Typography.percent)

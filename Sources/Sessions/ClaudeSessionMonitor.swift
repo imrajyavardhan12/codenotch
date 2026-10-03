@@ -40,6 +40,7 @@ final class ClaudeSessionMonitor: ObservableObject, AgentActivityMonitor {
         let timer = Timer(timeInterval: livenessInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.rescan() }
         }
+        timer.tolerance = livenessInterval / 2
         RunLoop.main.add(timer, forMode: .common)
         livenessTimer = timer
     }

@@ -25,6 +25,15 @@ final class CodexActivityMonitor: ObservableObject, AgentActivityMonitor {
     /// How long after the last write a turn is still considered in flight.
     private let staleAfter: TimeInterval
     private var timer: Timer?
+    /// When the two stores last changed, and when they were last read in full.
+    /// Opening two SQLite databases every two seconds to learn that nothing is
+    /// happening is most of what this monitor costs; a `stat` of the files
+    /// answers the same question for almost nothing.
+    private var lastFingerprint: [Date?] = []
+    private var lastFullRead = Date.distantPast
+    /// A full read at least this often while idle, whatever the files say — the
+    /// rollout is appended to without necessarily touching either database.
+    private let idleFullReadEvery: TimeInterval = 10
 
     init(
         stateStore: URL = CodexStore.stateURL,
@@ -43,6 +52,7 @@ final class CodexActivityMonitor: ObservableObject, AgentActivityMonitor {
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.rescan() }
         }
+        timer.tolerance = interval / 2
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
     }
@@ -53,10 +63,30 @@ final class CodexActivityMonitor: ObservableObject, AgentActivityMonitor {
     }
 
     private func rescan() {
+        let fingerprint = Self.fingerprint(stateStore: stateStore, desktopStore: desktopStore)
+        let now = Date()
+        // Idle, unchanged, and read recently: still idle. Anything showing as
+        // working is always re-read, because it has to time out on its own.
+        if sessions.isEmpty, fingerprint == lastFingerprint,
+           now.timeIntervalSince(lastFullRead) < idleFullReadEvery {
+            return
+        }
+        lastFingerprint = fingerprint
+        lastFullRead = now
         let found = Self.read(stateStore: stateStore, desktopStore: desktopStore,
                               staleAfter: staleAfter)
         guard found != sessions else { return }
         sessions = found
+    }
+
+    /// Modification dates of both stores and their write-ahead logs, which is
+    /// where the writes land while the owning app is running.
+    static func fingerprint(stateStore: URL, desktopStore: URL) -> [Date?] {
+        [stateStore, desktopStore].flatMap { url in
+            [url.path, url.path + "-wal"].map {
+                (try? FileManager.default.attributesOfItem(atPath: $0))?[.modificationDate] as? Date
+            }
+        }
     }
 
     static func read(stateStore: URL, desktopStore: URL,

@@ -550,14 +550,32 @@ final class ClickPinReleaseTests: XCTestCase {
             click: CGPoint(x: 10, y: 10), panelFrame: frame))
     }
 
-    /// …but a click inside the panel never does — that is ordinary use.
-    func testAClickInsideThePanelReleasesNothing() {
+    /// …but a click on the notch itself never does — that is ordinary use.
+    func testAClickOnTheNotchReleasesNothing() {
         let controller = expandedController()
         controller.togglePinnedByClick()
 
-        let frame = CGRect(x: 100, y: 100, width: 200, height: 400)
-        XCTAssertFalse(controller.clickAwayShouldReleasePin(
-            click: CGPoint(x: 150, y: 200), panelFrame: frame))
+        let frame = CGRect(origin: CGPoint(x: 100, y: 100), size: controller.model.panelSize)
+        let live = controller.liveRectForTesting
+        let onNotch = CGPoint(x: frame.minX + live.midX, y: frame.maxY - live.midY)
+        XCTAssertFalse(controller.clickAwayShouldReleasePin(click: onNotch, panelFrame: frame))
+    }
+
+    /// The panel is mostly hole — it reserves room for the tooltip — and a click
+    /// there goes to whatever is underneath. It is a click away, even though
+    /// the point is inside the panel's rectangle; counting it as a click on the
+    /// notch left the pin standing while the user clicked somewhere else.
+    func testAClickInTheTransparentPartOfThePanelReleasesTheClickPin() {
+        let controller = expandedController()
+        controller.togglePinnedByClick()
+
+        let frame = CGRect(origin: CGPoint(x: 100, y: 100), size: controller.model.panelSize)
+        let hole = CGPoint(x: 1, y: 1)   // panel-local, top-left origin
+        XCTAssertFalse(controller.liveRectForTesting.contains(hole),
+                       "the test point must be a hole for this to mean anything")
+        XCTAssertTrue(frame.contains(CGPoint(x: frame.minX + hole.x, y: frame.maxY - hole.y)))
+        XCTAssertTrue(controller.clickAwayShouldReleasePin(
+            click: CGPoint(x: frame.minX + hole.x, y: frame.maxY - hole.y), panelFrame: frame))
     }
 
     /// …and an explicit Keep-open survives clicks elsewhere, which is what

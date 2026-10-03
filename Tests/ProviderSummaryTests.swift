@@ -88,6 +88,33 @@ final class ProviderSummaryTests: XCTestCase {
 
     // MARK: - Helpers
 
+    /// An expired login with nothing remembered used to read "Waiting for the
+    /// first reading…" — for as long as the token stayed expired, which is until
+    /// the owning app is next used. It has to say what is being waited for.
+    func testAnExpiredLoginWithNoReadingSaysSo() async {
+        let provider = SwitchableProvider(outcome: .failure(.credentialExpired))
+        let store = makeStore(provider)
+
+        await store.refresh()
+
+        let message = store.snapshots.first?.statusMessage ?? ""
+        XCTAssertTrue(message.contains("saved login has expired"), "got: \(message)")
+        XCTAssertFalse(message.contains("Waiting for the first reading"))
+    }
+
+    /// With a reading in hand the same failure still just ages it.
+    func testAnExpiredLoginWithAReadingKeepsTheReading() async {
+        let provider = SwitchableProvider(outcome: .success)
+        let store = makeStore(provider)
+        await store.refresh()
+        provider.outcome = .failure(.credentialExpired)
+
+        await store.refresh()
+
+        XCTAssertEqual(store.snapshots.first?.windows.count, 1)
+        XCTAssertNil(store.snapshots.first?.statusMessage)
+    }
+
     /// Opening Settings must not read a switched-off provider's credential.
     /// `account()` is that read, and for Antigravity it touched the keychain
     /// on every open, for a row that says only "Signed out".

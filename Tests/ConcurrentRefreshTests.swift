@@ -15,14 +15,25 @@ final class ConcurrentRefreshTests: XCTestCase {
         /// while one is in flight.
         var delay: TimeInterval
 
+        private static func block(seconds: TimeInterval) {
+            let end = Date().addingTimeInterval(seconds)
+            while Date() < end { usleep(20_000) }
+        }
+
         init(id: String, delay: TimeInterval = 0) {
             self.id = id
             self.displayName = id
             self.delay = delay
         }
 
+        /// Blocks a thread instead of sleeping cooperatively, so cancellation
+        /// cannot reach it — what a keychain dialogue or a subprocess wait does.
+        var blocksUninterruptibly = false
+
         func fetchSnapshot() async throws -> ProviderSnapshot {
-            if delay > 0 {
+            if blocksUninterruptibly {
+                await Task.detached { Self.block(seconds: self.delay) }.value
+            } else if delay > 0 {
                 try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             }
             return ProviderSnapshot(
@@ -60,6 +71,28 @@ final class ConcurrentRefreshTests: XCTestCase {
         XCTAssertEqual(byID["fast"]?.windows.count, 1, "the healthy provider has no reading")
         XCTAssertTrue(byID["slow"]?.windows.isEmpty ?? false,
                       "the hung provider should have degraded to no reading on a cold start")
+    }
+
+    /// The case the first version of the timeout got wrong: work that cannot be
+    /// cancelled. A task group waits for every child, so the "timeout" fired
+    /// only once the blocked work gave up on its own — measured at 41s against a
+    /// 15s limit on a real keychain prompt, with every other ring frozen too.
+    func testUncancellableWorkStillTimesOutOnTime() async {
+        let blocked = Stub(id: "blocked", delay: 3)
+        blocked.blocksUninterruptibly = true
+        let store = store([blocked, Stub(id: "fast")], timeout: 0.3)
+
+        let start = Date()
+        await store.refresh()
+        let elapsed = Date().timeIntervalSince(start)
+
+        XCTAssertLessThan(elapsed, 1.5, "the timeout waited for work it could not cancel")
+        let byID = Dictionary(uniqueKeysWithValues: store.snapshots.map { ($0.id, $0) })
+        XCTAssertEqual(byID["fast"]?.windows.count, 1)
+        guard case .error(let why) = byID["blocked"]?.status else {
+            return XCTFail("a timed-out fetch should read as an error")
+        }
+        XCTAssertTrue(why.contains("Timed out"))
     }
 
     /// Rings are positional: whichever provider answers first must not steal

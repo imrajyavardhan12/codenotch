@@ -268,6 +268,62 @@ final class CodexBridgeTests: XCTestCase {
                       "a standalone CLI install is not looked for")
     }
 
+    /// Codex is published to npm, so it often lives under a Node version
+    /// manager, which no fixed path can name. On the machine this was found on
+    /// it was `~/.nvm/versions/node/v24.11.0/bin/codex`, never searched for —
+    /// so the live figure was never asked for and the ring stayed blank.
+    func testItFindsACodexInstalledThroughNvmNewestFirst() throws {
+        let home = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("codex-nvm-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        for version in ["v9.0.0", "v24.11.0", "v20.1.0"] {
+            try FileManager.default.createDirectory(
+                at: home.appendingPathComponent(".nvm/versions/node/\(version)/bin"),
+                withIntermediateDirectories: true)
+        }
+
+        let paths = CodexBridge.candidatePaths(home: home.path, appBundle: nil, environmentPath: "")
+        let versions = paths.filter { $0.path.contains("/.nvm/") }
+            .map { $0.deletingLastPathComponent().deletingLastPathComponent().lastPathComponent }
+        XCTAssertEqual(versions, ["v24.11.0", "v20.1.0", "v9.0.0"],
+                       "versions must sort numerically, newest first")
+    }
+
+    func testItSearchesThePathAndSkipsRepeats() {
+        let paths = CodexBridge.candidatePaths(
+            home: "/Users/x", appBundle: nil,
+            environmentPath: "/opt/homebrew/bin:/somewhere/bin:/somewhere/bin")
+        XCTAssertTrue(paths.contains { $0.path == "/somewhere/bin/codex" })
+        XCTAssertEqual(paths.filter { $0.path == "/somewhere/bin/codex" }.count, 1)
+        XCTAssertEqual(paths.filter { $0.path == "/opt/homebrew/bin/codex" }.count, 1,
+                       "a fixed location repeated by PATH is searched once")
+    }
+
+    /// A node-script install dies under a Finder launch's bare PATH, because
+    /// `#!/usr/bin/env node` cannot find node. Its own directory is where node is.
+    func testTheChildGetsTheBinarysDirectoryOnItsPath() {
+        let environment = CodexBridge.environment(
+            for: URL(fileURLWithPath: "/x/node/v24/bin/codex"),
+            base: ["PATH": "/usr/bin:/bin", "HOME": "/Users/x"])
+        let path = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
+        XCTAssertEqual(path.first, "/x/node/v24/bin")
+        XCTAssertEqual(path.count, Set(path).count, "no directory twice")
+        XCTAssertTrue(path.contains("/usr/bin"))
+        XCTAssertEqual(environment["HOME"], "/Users/x", "the rest of the environment is kept")
+    }
+
+    /// Codex exiting before it reads its handshake is ordinary; it must come
+    /// back as an error, not end this process with SIGPIPE or an exception.
+    func testAServerThatExitsImmediatelyIsAnErrorNotACrash() throws {
+        let script = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("fake-codex-\(UUID().uuidString)")
+        try "#!/bin/sh\nexit 0\n".write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        defer { try? FileManager.default.removeItem(at: script) }
+
+        XCTAssertThrowsError(try CodexBridge.rateLimits(executable: script, timeout: 5))
+    }
+
     /// The handshake has to name a client and ask by id, or the reply cannot be
     /// matched to the request.
     func testTheHandshakeAsksForRateLimitsLast() {

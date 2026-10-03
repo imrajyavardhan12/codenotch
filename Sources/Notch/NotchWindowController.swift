@@ -240,11 +240,18 @@ final class NotchWindowController {
         )
     }
 
-    private func updateInteractiveRects() {
+    /// Everything the panel currently takes the mouse for: the notch and, while
+    /// a ring is hovered, its card. The rest of the panel is a hole.
+    private var interactiveRegions: [CGRect] {
         var rects = [liveRect]
         if model.isExpanded, let index = model.hoveredIndex, let card = tooltipRect(index: index) {
             rects.append(card)
         }
+        return rects
+    }
+
+    private func updateInteractiveRects() {
+        let rects = interactiveRegions
         hostingView?.interactiveRects = rects
         if let panel {
             panel.ignoresMouseEvents = !rects.contains { $0.contains(localCursor(in: panel.frame)) }
@@ -270,12 +277,15 @@ final class NotchWindowController {
                 self?.cursorMoved()
             }
         }
+        // Hover is judged by feel; a tenth of a second either way is not
+        // felt, and lets the wakeup ride along with others.
+        poll.tolerance = 0.1
         RunLoop.main.add(poll, forMode: .common)
         cursorTimer = poll
 
         let events: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged]
         let handler: (NSEvent) -> Void = { [weak self] _ in
-            MainActor.assumeIsolated { self?.cursorMoved() }
+            MainActor.assumeIsolated { self?.cursorMovedByEvent() }
         }
         if let global = NSEvent.addGlobalMonitorForEvents(matching: events, handler: handler) {
             mouseMonitors.append(global)
@@ -330,6 +340,20 @@ final class NotchWindowController {
         }
     }
 
+    /// The per-event entry. A global monitor fires for every pointer move
+    /// anywhere on screen, up to a hundred times a second, and nearly all of
+    /// them are nowhere near a folded notch. Those are dropped here: the poll
+    /// still runs every 0.3s and catches anything this lets through late, and a
+    /// pointer that does approach crosses the margin on the way in.
+    private func cursorMovedByEvent() {
+        guard let panel, panel.isVisible else { return }
+        if !model.isExpanded, model.hoveredIndex == nil, !isPointing {
+            let local = localCursor(in: panel.frame)
+            guard pillRect.insetBy(dx: -48, dy: -48).contains(local) else { return }
+        }
+        cursorMoved()
+    }
+
     private func localCursor(in frame: CGRect) -> CGPoint {
         let mouse = NSEvent.mouseLocation
         return CGPoint(x: mouse.x - frame.minX, y: frame.maxY - mouse.y)
@@ -344,7 +368,10 @@ final class NotchWindowController {
     }
 
     private func cursorMoved() {
-        guard let panel else { return }
+        // Nothing to track while the panel is ordered out (Hidden): the
+        // regions below would still answer, and the pointing hand could be
+        // pushed over a notch that is not there.
+        guard let panel, panel.isVisible else { return }
         let local = localCursor(in: panel.frame)
         let overTooltip = model.hoveredIndex
             .flatMap(tooltipRect(index:))
@@ -621,9 +648,17 @@ final class NotchWindowController {
     /// tests can drive it; the live monitors supply the event's location.
     /// Only a light (click) hold releases — an explicit Keep-open survives
     /// clicks elsewhere, which is what makes it explicit.
+    ///
+    /// "Elsewhere" is anywhere the notch is not drawn, not merely outside the
+    /// panel. The panel reserves room for the tooltip and is mostly hole — a
+    /// strip hundreds of points deep beside the notch — and a click in that
+    /// hole goes to the app underneath, so counting it as a click *on* the
+    /// notch left the pin standing while the user clicked somewhere else.
     func clickAwayShouldReleasePin(click: CGPoint, panelFrame: CGRect) -> Bool {
         guard model.isPinned, pinSource == .click else { return false }
-        return !panelFrame.contains(click)
+        guard panelFrame.contains(click) else { return true }
+        let local = CGPoint(x: click.x - panelFrame.minX, y: panelFrame.maxY - click.y)
+        return !interactiveRegions.contains { $0.contains(local) }
     }
 
     /// Whether Esc with the cursor at a panel-local point releases the pin.
@@ -660,6 +695,7 @@ final class NotchWindowController {
         let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.model.now = Date() }
         }
+        timer.tolerance = 5
         RunLoop.main.add(timer, forMode: .common)
         clockTimer = timer
     }

@@ -6,6 +6,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notchController: NotchWindowController?
     private var store: UsageStore?
     private var monitors: [String: any AgentActivityMonitor] = [:]
+    /// Which monitors are currently polling. A monitor for a provider that is
+    /// switched off is stopped: it costs a timer and file or database reads
+    /// every few seconds for a ring nobody is looking at, and its activity
+    /// would otherwise keep the usage poll at full rate.
+    private var runningMonitors = Set<String>()
     /// Held for the life of the app: dropping it would stop delivery, and the
     /// settings sheet observes it for the permission state.
     private var notifier: Notifier?
@@ -262,14 +267,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
                 .store(in: &cancellables)
-            monitor.start()
         }
-        // Poll usage hard only while something is actually running.
-        store?.isBusy = { monitors.values.contains { m in m.sessions.contains { $0.state == .busy } } }
         self.monitors = monitors
+        // Started and stopped by what is switched on. The subscription delivers
+        // the current value a loop turn after it is made, which is what starts
+        // the first batch; with no preferences (the demo) everything runs.
+        if let preferences {
+            preferences.$disconnectedProviders
+                .receive(on: RunLoop.main)
+                .sink { [weak self] _ in self?.syncMonitors() }
+                .store(in: &cancellables)
+        } else {
+            syncMonitors()
+        }
+        // Poll usage hard only while something switched on is actually running.
+        store?.isBusy = { [weak self] in
+            guard let self else { return false }
+            let off = self.preferences?.disconnectedProviders ?? []
+            return self.monitors.contains { id, monitor in
+                !off.contains(id) && monitor.sessions.contains { $0.state == .busy }
+            }
+        }
 
         controller.show()
         notchController = controller
+    }
+
+    @MainActor
+    private func syncMonitors() {
+        let off = preferences?.disconnectedProviders ?? []
+        for (id, monitor) in monitors {
+            if off.contains(id) {
+                guard runningMonitors.remove(id) != nil else { continue }
+                monitor.stop()
+                // Its last report would otherwise stay on screen as a ring
+                // that never stops spinning.
+                notchController?.model.sessions[id] = []
+            } else if runningMonitors.insert(id).inserted {
+                monitor.start()
+            }
+        }
     }
 
     /// Closing the settings window must not take the app with it.

@@ -52,6 +52,7 @@ final class CursorActivityMonitor: ObservableObject, AgentActivityMonitor {
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.rescan() }
         }
+        timer.tolerance = interval / 2
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
     }
@@ -62,6 +63,13 @@ final class CursorActivityMonitor: ObservableObject, AgentActivityMonitor {
     }
 
     private func rescan() {
+        // No store, no Cursor to watch. The launch date below enumerates every
+        // running application, which is the dearest thing this does and was
+        // done every two seconds, for ever, on machines without the editor.
+        guard FileManager.default.fileExists(atPath: store.path) else {
+            if !sessions.isEmpty { sessions = [] }
+            return
+        }
         let found = Self.read(store: store, cursorLaunchedAt: Self.cursorLaunchDate(),
                               staleAfter: staleAfter)
         guard found != sessions else { return }

@@ -36,6 +36,7 @@ final class AntigravityActivityMonitor: AgentActivityMonitor {
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             self?.poll()
         }
+        timer.tolerance = interval / 2
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
     }

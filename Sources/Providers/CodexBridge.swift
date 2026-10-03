@@ -27,23 +27,59 @@ enum CodexBridge {
     /// Where to look for the binary, in order.
     ///
     /// The app bundle first: it is the copy that matches the app writing the
-    /// rollouts. A standalone CLI install is the fallback.
+    /// rollouts. Then the fixed install locations, then the Node version
+    /// managers and the process's own `PATH`: Codex is published to npm, so
+    /// on many machines it lives under `~/.nvm/versions/node/<v>/bin` — which
+    /// no fixed list can name, and which is where the one this was written
+    /// against was. Missing it did not fail loudly; it quietly meant the live
+    /// figure was never asked for and the ring fell back to a log file that
+    /// carries no windows at all.
     static func candidatePaths(home: String = NSHomeDirectory(),
-                               appBundle: URL? = nil) -> [URL] {
+                               appBundle: URL? = nil,
+                               environmentPath: String? = ProcessInfo.processInfo.environment["PATH"],
+                               fileManager: FileManager = .default) -> [URL] {
         var paths: [URL] = []
         if let appBundle {
             paths.append(appBundle.appendingPathComponent("Contents/Resources/codex"))
         }
         paths.append(URL(fileURLWithPath: "/Applications/ChatGPT.app/Contents/Resources/codex"))
-        paths.append(URL(fileURLWithPath: home).appendingPathComponent(".codex/bin/codex"))
+        let homeURL = URL(fileURLWithPath: home)
+        paths.append(homeURL.appendingPathComponent(".codex/bin/codex"))
         paths.append(URL(fileURLWithPath: "/opt/homebrew/bin/codex"))
         paths.append(URL(fileURLWithPath: "/usr/local/bin/codex"))
-        return paths
+        for relative in [".volta/bin", ".bun/bin", ".local/bin", ".npm-global/bin"] {
+            paths.append(homeURL.appendingPathComponent(relative).appendingPathComponent("codex"))
+        }
+        paths += nodeManagerBinaries(home: homeURL, fileManager: fileManager)
+        for directory in (environmentPath ?? "").split(separator: ":") where !directory.isEmpty {
+            paths.append(URL(fileURLWithPath: String(directory)).appendingPathComponent("codex"))
+        }
+        // A directory can be reached twice — `PATH` often repeats the fixed ones.
+        var seen = Set<String>()
+        return paths.filter { seen.insert($0.path).inserted }
+    }
+
+    /// `codex` under every Node version a manager has installed, newest first:
+    /// an older toolchain is the likelier place for a stale copy.
+    private static func nodeManagerBinaries(home: URL, fileManager: FileManager) -> [URL] {
+        let roots = [
+            (".nvm/versions/node", "bin"),
+            ("Library/Application Support/fnm/node-versions", "installation/bin"),
+            (".local/share/fnm/node-versions", "installation/bin")
+        ]
+        return roots.flatMap { root, bin -> [URL] in
+            let directory = home.appendingPathComponent(root)
+            let versions = (try? fileManager.contentsOfDirectory(atPath: directory.path)) ?? []
+            return versions
+                .sorted { $0.compare($1, options: .numeric) == .orderedDescending }
+                .map { directory.appendingPathComponent($0).appendingPathComponent(bin)
+                    .appendingPathComponent("codex") }
+        }
     }
 
     static func executable(fileManager: FileManager = .default) -> URL? {
         let bundle = NSWorkspace.shared.urlForApplication(withBundleIdentifier: appBundleID)
-        let found = candidatePaths(appBundle: bundle).first {
+        let found = candidatePaths(appBundle: bundle, fileManager: fileManager).first {
             fileManager.isExecutableFile(atPath: $0.path)
         }
         if found == nil {
@@ -51,6 +87,33 @@ enum CodexBridge {
         }
         return found
     }
+
+    /// The environment to start Codex in.
+    ///
+    /// An app launched from Finder inherits launchd's bare `PATH`, not the
+    /// shell's. A Codex installed through npm is a `#!/usr/bin/env node`
+    /// script, so under that `PATH` it dies at once with "env: node: No such
+    /// file" — the version manager's own `bin` directory is where `node` is,
+    /// and it is the one place guaranteed to hold the node that installed it.
+    static func environment(for executable: URL,
+                            base: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+        var directories = [executable.deletingLastPathComponent().path,
+                           executable.resolvingSymlinksInPath().deletingLastPathComponent().path]
+        directories += (base["PATH"] ?? "").split(separator: ":").map(String.init)
+        directories += ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
+        var seen = Set<String>()
+        var environment = base
+        environment["PATH"] = directories.filter { !$0.isEmpty && seen.insert($0).inserted }
+            .joined(separator: ":")
+        return environment
+    }
+
+    /// A write to a pipe whose reader has gone raises SIGPIPE, which ends the
+    /// process by default, and `FileHandle.write(_:)` turns the same failure
+    /// into an Objective-C exception Swift cannot catch. Codex exiting before
+    /// it has read its handshake is an ordinary thing for it to do, so the
+    /// signal is ignored once and the throwing write is used.
+    private static let ignoreBrokenPipes: Void = { signal(SIGPIPE, SIG_IGN) }()
 
     // MARK: - Asking
 
@@ -63,6 +126,8 @@ enum CodexBridge {
         let process = Process()
         process.executableURL = executable
         process.arguments = ["app-server"]
+        process.environment = environment(for: executable)
+        _ = ignoreBrokenPipes
         let input = Pipe(), output = Pipe()
         process.standardInput = input
         process.standardOutput = output
@@ -81,7 +146,14 @@ enum CodexBridge {
         }
 
         Log.usage.debug("codex: asking \(executable.path, privacy: .public) for rate limits")
-        for line in handshake { input.fileHandleForWriting.write(Data((line + "\n").utf8)) }
+        do {
+            for line in handshake {
+                try input.fileHandleForWriting.write(contentsOf: Data((line + "\n").utf8))
+            }
+        } catch {
+            Log.usage.error("codex: app server closed its input before the handshake: \(error.localizedDescription, privacy: .public)")
+            throw UsageProviderError.nothingMetered("Codex's app server did not start")
+        }
 
         var buffer = Data()
         while true {

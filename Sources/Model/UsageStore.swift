@@ -95,6 +95,12 @@ final class UsageStore: ObservableObject {
     /// never depends on when the task body happens to start.
     private var isRefreshing = false
     private var wakeObserver: NSObjectProtocol?
+    /// The last failure logged per provider, so a condition that persists is
+    /// said once rather than every poll. A standing state — a token that has
+    /// expired overnight, a plan that meters nothing — was written to the log
+    /// at error level every minute for hours, which is what buried the one
+    /// line that mattered the next time something real went wrong.
+    private var lastLoggedFailure: [String: String] = [:]
 
     init(
         providers: [UsageProvider],
@@ -167,6 +173,8 @@ final class UsageStore: ObservableObject {
         let timer = Timer(timeInterval: refreshInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
+        // A minute-scale poll has no use for the exact second.
+        timer.tolerance = refreshInterval / 10
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
 
@@ -377,11 +385,32 @@ final class UsageStore: ObservableObject {
             }
             lastGood[provider.id] = (fresh, Date())
             refusedAccess.remove(provider.id)
+            lastLoggedFailure.removeValue(forKey: provider.id)
             Log.usage.debug("\(provider.id, privacy: .public): \(fresh.windows.count) window(s)")
             return fresh
         } catch {
-            Log.usage.error("\(provider.id, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+            logFailure(error, for: provider.id)
             return degraded(provider: provider, error: error)
+        }
+    }
+
+    /// Says a failure once, when it starts or changes; repeats of the same one
+    /// are debug-level. Conditions that are statements about the account rather
+    /// than faults — expired token, nothing metered, rate limited — are notices,
+    /// not errors, and read as such.
+    private func logFailure(_ error: Error, for id: String) {
+        let text = String(describing: error)
+        guard lastLoggedFailure[id] != text else {
+            Log.usage.debug("\(id, privacy: .public) still failing: \(text, privacy: .public)")
+            return
+        }
+        lastLoggedFailure[id] = text
+        switch error {
+        case UsageProviderError.credentialExpired, UsageProviderError.nothingMetered,
+             UsageProviderError.rateLimited:
+            Log.usage.notice("\(id, privacy: .public): \(text, privacy: .public)")
+        default:
+            Log.usage.error("\(id, privacy: .public) failed: \(text, privacy: .public)")
         }
     }
 
@@ -417,7 +446,16 @@ final class UsageStore: ObservableObject {
 
         guard let previous = lastGood[provider.id] else {
             var empty = Self.placeholder(provider)
-            empty.status = status
+            // Nothing remembered to age, so a plain "stale" would read as
+            // "Waiting for the first reading…" for as long as the token stays
+            // expired — which is until the owning app is next used, possibly
+            // days. Say what is actually being waited for.
+            if case UsageProviderError.credentialExpired = error {
+                empty.status = .error("the saved login has expired. Open \(provider.displayName) "
+                                      + "once and it refreshes itself.")
+            } else {
+                empty.status = status
+            }
             return empty
         }
 
@@ -498,24 +536,57 @@ private struct ProviderTimeout: LocalizedError {
     var errorDescription: String? { "Timed out after \(Int(seconds))s" }
 }
 
-/// Races `work` against a sleep and returns whichever finishes first. The
-/// loser is cancelled; if the work ignores cancellation its answer is still
-/// discarded, and the slot heals itself on the next scheduled refresh rather
-/// than staying dimmed.
+/// Races `work` against a sleep and returns whichever finishes first.
+///
+/// Deliberately not a task group. A group cannot return until every child has
+/// finished, so a worker that ignores cancellation — a blocking keychain call,
+/// a subprocess, a dialogue waiting on a person — held the "timeout" open until
+/// the work gave up by itself: logged on a real machine at 41 seconds against a
+/// 15 second limit, with every other ring frozen behind it. Here the first
+/// finisher resumes the caller and the loser is cancelled; work that ignores
+/// the cancellation runs on in the background and its answer is discarded.
 private func withTimeout<T: Sendable>(
     seconds: TimeInterval,
     work: @escaping @Sendable () async throws -> T
 ) async throws -> T {
-    try await withThrowingTaskGroup(of: T.self) { group in
-        group.addTask { try await work() }
-        group.addTask {
-            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-            throw ProviderTimeout(seconds: seconds)
+    try await withCheckedThrowingContinuation { continuation in
+        let race = TimeoutRace()
+        let worker = Task {
+            do {
+                let value = try await work()
+                if race.claim() { race.cancelTimer(); continuation.resume(returning: value) }
+            } catch {
+                if race.claim() { race.cancelTimer(); continuation.resume(throwing: error) }
+            }
         }
-        guard let winner = try await group.next() else {
-            throw ProviderTimeout(seconds: seconds)
+        race.timer = Task {
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            if race.claim() {
+                worker.cancel()
+                continuation.resume(throwing: ProviderTimeout(seconds: seconds))
+            }
         }
-        group.cancelAll()
-        return winner
     }
+}
+
+/// Decides who won: exactly one of the worker and the timer may resume the
+/// caller, and resuming a continuation twice is a crash.
+private final class TimeoutRace: @unchecked Sendable {
+    private let lock = NSLock()
+    private var finished = false
+    private var storedTimer: Task<Void, Never>?
+
+    var timer: Task<Void, Never>? {
+        get { lock.lock(); defer { lock.unlock() }; return storedTimer }
+        set { lock.lock(); storedTimer = newValue; lock.unlock() }
+    }
+
+    func claim() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if finished { return false }
+        finished = true
+        return true
+    }
+
+    func cancelTimer() { timer?.cancel() }
 }
