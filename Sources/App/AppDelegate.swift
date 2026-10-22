@@ -66,6 +66,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Preferences.migrateFromPreviousName()
             let preferences = Preferences()
             self.preferences = preferences
+            // A reinstall or a move leaves the system's record pointing at the
+            // old copy. After launch rather than during it: the calls go to a
+            // system service, and nothing on screen depends on the answer.
+            DispatchQueue.main.async { preferences.reconcileLoginItem() }
 
             // Cursor reads the editor's own session rather than a browser one:
             // signing into cursor.com separately created a second, empty account.
